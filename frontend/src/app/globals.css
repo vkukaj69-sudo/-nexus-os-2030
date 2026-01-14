@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nexus-glow: #6366f1;
+  --nexus-accent: #00f5d4;
+}
+
+body {
+  background: #0a0a0f;
+  color: #e5e7eb;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #12121a; }
+::-webkit-scrollbar-thumb { background: #3a3a4a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+
+/* Glow Effects */
+.glow-box {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+.glow-text {
+  text-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+.glow-border {
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+/* Agent Status Indicators */
+.status-idle { background: #6b7280; }
+.status-thinking { background: #f59e0b; animation: pulse 1s infinite; }
+.status-working { background: #10b981; animation: pulse 1.5s infinite; }
+.status-error { background: #ef4444; }
+
+/* Card Hover */
+.nexus-card {
+  @apply bg-nexus-800 rounded-xl border border-nexus-600 transition-all duration-300;
+}
+.nexus-card:hover {
+  @apply border-nexus-400 glow-box;
+}
+
+/* Button Styles */
+.nexus-btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+}
+.nexus-btn-primary {
+  @apply bg-nexus-400 text-white hover:bg-nexus-300;
+}
+.nexus-btn-ghost {
+  @apply bg-transparent text-gray-400 hover:text-white hover:bg-nexus-700;
+}
