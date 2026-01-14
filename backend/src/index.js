@@ -364,3 +364,70 @@ app.post('/api/siteforge/create', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// MEMORY SERVICE
+// ═══════════════════════════════════════════
+
+const { MemoryService } = require('./services');
+const memoryService = new MemoryService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+
+// Memory endpoints
+app.post('/api/memory/store', authenticate, async (req, res) => {
+  try {
+    const { type, data } = req.body;
+    const userId = req.user.userId;
+    
+    let result;
+    switch (type) {
+      case 'episodic':
+        result = await memoryService.storeEpisodic(userId, data);
+        break;
+      case 'semantic':
+        result = await memoryService.storeSemantic(userId, data);
+        break;
+      case 'procedural':
+        result = await memoryService.storeProcedural(userId, data);
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid memory type' });
+    }
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/memory/recall', authenticate, async (req, res) => {
+  try {
+    const { type, query, agentId, limit = 5 } = req.body;
+    const userId = req.user.userId;
+    
+    let result;
+    switch (type) {
+      case 'episodic':
+        result = await memoryService.recallEpisodic(userId, query, limit);
+        break;
+      case 'semantic':
+        result = await memoryService.recallSemantic(userId, query, limit);
+        break;
+      case 'procedural':
+        result = await memoryService.recallProcedural(userId, agentId, query, limit);
+        break;
+      case 'context':
+        result = await memoryService.buildContext(userId, query, agentId);
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid memory type' });
+    }
+    res.json({ success: true, memories: result });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/memory/consolidate', authenticate, async (req, res) => {
+  try {
+    const result = await memoryService.consolidate(req.user.userId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Inject memory service into agents
+agents.mnemosyne.memoryService = memoryService;
