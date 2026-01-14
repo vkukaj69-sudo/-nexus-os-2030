@@ -950,3 +950,90 @@ app.put('/api/agent/:agentId/status', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// ANALYTICS SERVICE
+// ═══════════════════════════════════════════
+
+const { AnalyticsService } = require('./services');
+const analyticsService = new AnalyticsService(pool);
+
+// Track event
+app.post('/api/analytics/event', authenticate, async (req, res) => {
+  try {
+    const result = await analyticsService.trackEvent(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get usage stats
+app.get('/api/analytics/usage', authenticate, async (req, res) => {
+  try {
+    const stats = await analyticsService.getUsageStats(req.user.userId, req.query.days || 30);
+    res.json({ success: true, stats });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get usage by agent
+app.get('/api/analytics/agents', authenticate, async (req, res) => {
+  try {
+    const agents = await analyticsService.getUsageByAgent(req.user.userId, req.query.days || 30);
+    res.json({ success: true, agents });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get usage timeline
+app.get('/api/analytics/timeline', authenticate, async (req, res) => {
+  try {
+    const timeline = await analyticsService.getUsageTimeline(req.user.userId, req.query.days || 7);
+    res.json({ success: true, timeline });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get agent performance
+app.get('/api/analytics/agent/:agentId', authenticate, async (req, res) => {
+  try {
+    const performance = await analyticsService.getAgentPerformance(req.user.userId, req.params.agentId, req.query.days || 30);
+    res.json({ success: true, performance });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get insights
+app.get('/api/analytics/insights', authenticate, async (req, res) => {
+  try {
+    const insights = await analyticsService.generateInsights(req.user.userId);
+    res.json({ success: true, insights });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get daily metrics
+app.get('/api/analytics/daily', authenticate, async (req, res) => {
+  try {
+    const metrics = await analyticsService.getDailyMetrics(req.user.userId, req.query.days || 30);
+    res.json({ success: true, metrics });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create dashboard
+app.post('/api/analytics/dashboard', authenticate, async (req, res) => {
+  try {
+    const result = await analyticsService.createDashboard(req.user.userId, req.body.name, req.body.widgets);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get dashboards
+app.get('/api/analytics/dashboards', authenticate, async (req, res) => {
+  try {
+    const dashboards = await analyticsService.getDashboards(req.user.userId);
+    res.json({ success: true, dashboards });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// System health
+app.get('/api/analytics/health', authenticate, async (req, res) => {
+  try {
+    const health = await analyticsService.getSystemHealth(req.query.hours || 1);
+    res.json({ success: true, health });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
