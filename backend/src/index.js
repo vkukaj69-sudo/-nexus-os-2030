@@ -556,3 +556,60 @@ app.post('/api/reasoning/chain', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// SELF-IMPROVEMENT SERVICE
+// ═══════════════════════════════════════════
+
+const { SelfImprovementService } = require('./services');
+const improvementService = new SelfImprovementService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+
+// Record performance metric
+app.post('/api/improve/metric', authenticate, async (req, res) => {
+  try {
+    const { agentId, metricType, value, context } = req.body;
+    const result = await improvementService.recordMetric(req.user.userId, agentId, metricType, value, context);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get agent stats
+app.get('/api/improve/stats/:agentId', authenticate, async (req, res) => {
+  try {
+    const stats = await improvementService.getAgentStats(req.user.userId, req.params.agentId, req.query.days || 30);
+    res.json({ success: true, stats });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Submit feedback
+app.post('/api/improve/feedback', authenticate, async (req, res) => {
+  try {
+    const { agentId, rating, feedbackType, comment, interactionId } = req.body;
+    const result = await improvementService.submitFeedback(req.user.userId, agentId, { rating, feedbackType, comment, interactionId });
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get active improvements
+app.get('/api/improve/improvements/:agentId', authenticate, async (req, res) => {
+  try {
+    const improvements = await improvementService.getActiveImprovements(req.user.userId, req.params.agentId);
+    res.json({ success: true, improvements });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Analyze agent performance
+app.get('/api/improve/analyze/:agentId', authenticate, async (req, res) => {
+  try {
+    const analysis = await improvementService.analyzePerformance(req.user.userId, req.params.agentId);
+    res.json(analysis);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create A/B experiment
+app.post('/api/improve/experiment', authenticate, async (req, res) => {
+  try {
+    const result = await improvementService.createExperiment(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
