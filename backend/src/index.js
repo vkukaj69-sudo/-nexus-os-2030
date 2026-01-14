@@ -498,3 +498,61 @@ app.post('/api/knowledge/extract', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// REASONING ENGINE SERVICE
+// ═══════════════════════════════════════════
+
+const { ReasoningService } = require('./services');
+const reasoningService = new ReasoningService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+
+// Create goal
+app.post('/api/reasoning/goal', authenticate, async (req, res) => {
+  try {
+    const result = await reasoningService.createGoal(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Decompose goal into subtasks
+app.post('/api/reasoning/goal/:goalId/decompose', authenticate, async (req, res) => {
+  try {
+    const result = await reasoningService.decomposeGoal(req.user.userId, req.params.goalId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get goals
+app.get('/api/reasoning/goals', authenticate, async (req, res) => {
+  try {
+    const goals = await reasoningService.getGoals(req.user.userId, req.query.status);
+    res.json({ success: true, goals });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Reason about something
+app.post('/api/reasoning/think', authenticate, async (req, res) => {
+  try {
+    const { input, chainType = 'analysis', goalId } = req.body;
+    const result = await reasoningService.reason(req.user.userId, input, chainType, goalId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Make a decision
+app.post('/api/reasoning/decide', authenticate, async (req, res) => {
+  try {
+    const { decisionType, options, context } = req.body;
+    const result = await reasoningService.makeDecision(req.user.userId, decisionType, options, context);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Chain of thought reasoning
+app.post('/api/reasoning/chain', authenticate, async (req, res) => {
+  try {
+    const { problem, maxSteps = 5 } = req.body;
+    const result = await reasoningService.chainOfThought(req.user.userId, problem, maxSteps);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
