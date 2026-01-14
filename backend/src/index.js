@@ -772,3 +772,75 @@ app.put('/api/org/:orgId/member/:userId', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// WORKFLOW ENGINE SERVICE
+// ═══════════════════════════════════════════
+
+const { WorkflowService } = require('./services');
+const workflowService = new WorkflowService(pool, {});
+
+// Create workflow
+app.post('/api/workflow', authenticate, async (req, res) => {
+  try {
+    const result = await workflowService.createWorkflow(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get user workflows
+app.get('/api/workflows', authenticate, async (req, res) => {
+  try {
+    const workflows = await workflowService.getUserWorkflows(req.user.userId);
+    res.json({ success: true, workflows });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get workflow details
+app.get('/api/workflow/:workflowId', authenticate, async (req, res) => {
+  try {
+    const workflow = await workflowService.getWorkflow(req.params.workflowId);
+    const runs = await workflowService.getWorkflowRuns(req.params.workflowId, 10);
+    res.json({ success: true, workflow, runs });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Update workflow
+app.put('/api/workflow/:workflowId', authenticate, async (req, res) => {
+  try {
+    const result = await workflowService.updateWorkflow(req.params.workflowId, req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Execute workflow
+app.post('/api/workflow/:workflowId/run', authenticate, async (req, res) => {
+  try {
+    const result = await workflowService.executeWorkflow(req.params.workflowId, req.user.userId, req.body.input || {});
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get run details
+app.get('/api/workflow/run/:runId', authenticate, async (req, res) => {
+  try {
+    const run = await workflowService.getRunDetails(req.params.runId);
+    res.json({ success: true, run });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create webhook
+app.post('/api/workflow/:workflowId/webhook', authenticate, async (req, res) => {
+  try {
+    const result = await workflowService.createWebhook(req.user.userId, req.params.workflowId, req.body.name);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Webhook trigger endpoint (public)
+app.post('/api/webhook/:endpointKey', async (req, res) => {
+  try {
+    const result = await workflowService.triggerWebhook(req.params.endpointKey, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
