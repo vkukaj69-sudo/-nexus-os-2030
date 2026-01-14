@@ -1,0 +1,9 @@
+{
+  "name": "Nexus OS 2030 Evolution",
+  "description": "Autonomous Creator Neural Dominion. Sovereign, Projected, Infinite.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
