@@ -338,3 +338,29 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log('╚═══════════════════════════════════════════╝');
   console.log('');
 });
+
+// ═══════════════════════════════════════════
+// FUNNELSMITH - FUNNELS & LANDING PAGES
+// ═══════════════════════════════════════════
+
+app.post('/api/funnelsmith/create', authenticate, async (req, res) => {
+  try {
+    const funnelsmith = registry.get('funnelsmith_01');
+    const { type = 'landing_page', ...payload } = req.body;
+    const result = await funnelsmith.processTask({ type, payload });
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ═══════════════════════════════════════════
+// SITEFORGE - MICRO-WEBSITES
+// ═══════════════════════════════════════════
+
+app.post('/api/siteforge/create', authenticate, async (req, res) => {
+  try {
+    const siteforge = registry.get('siteforge_01');
+    const { type = 'microsite_create', ...payload } = req.body;
+    const result = await siteforge.processTask({ type, payload });
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});

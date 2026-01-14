@@ -49,3 +49,69 @@ class BaseAgent extends EventEmitter {
 
   // Standard task processing wrapper
   async processTask(task) {
+    try {
+      await this.setStatus('working');
+      this.currentJob = task;
+      this.lastActive = new Date();
+
+      const result = await this.execute(task);
+
+      this.tasksCompleted++;
+      await this.setStatus('idle');
+      this.currentJob = null;
+
+      return {
+        success: true,
+        agent: this.id,
+        result,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      await this.setStatus('error');
+      this.currentJob = null;
+
+      // Auto-recover to idle
+      setTimeout(() => this.setStatus('idle'), 1000);
+
+      return {
+        success: false,
+        agent: this.id,
+        error: error.message,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  // Request help from another agent
+  async requestAgent(targetAgentId, task) {
+    this.emit('agentRequest', {
+      from: this.id,
+      to: targetAgentId,
+      task
+    });
+  }
+
+  // Receive response from another agent
+  async receiveResponse(response) {
+    this.emit('agentResponse', {
+      agent: this.id,
+      response
+    });
+    return response;
+  }
+
+  // Serialize agent state
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      specialty: this.specialty,
+      status: this.status,
+      tasksCompleted: this.tasksCompleted,
+      lastActive: this.lastActive,
+      capabilities: this.capabilities
+    };
+  }
+}
+
+module.exports = BaseAgent;

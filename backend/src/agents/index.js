@@ -1,12 +1,6 @@
-/**
- * NEXUS OS - Agent System
- * Exports all agents and registry
- */
-
 const BaseAgent = require('./BaseAgent');
 const { AgentRegistry, registry } = require('./AgentRegistry');
 
-// Import all agents
 const OracleAgent = require('./oracle/OracleAgent');
 const ScryerAgent = require('./scryer/ScryerAgent');
 const ScribeAgent = require('./scribe/ScribeAgent');
@@ -16,8 +10,9 @@ const VulcanAgent = require('./vulcan/VulcanAgent');
 const BrandGuardAgent = require('./brandguard/BrandGuardAgent');
 const ReplyGuyAgent = require('./replyguy/ReplyGuyAgent');
 const CollabFinderAgent = require('./collabfinder/CollabFinderAgent');
+const FunnelSmithAgent = require('./funnelsmith/FunnelSmithAgent');
+const SiteForgeAgent = require('./siteforge/SiteForgeAgent');
 
-// Initialize all agents
 function initializeAgents(config = {}) {
   const agents = {
     oracle: new OracleAgent(),
@@ -28,13 +23,12 @@ function initializeAgents(config = {}) {
     vulcan: new VulcanAgent(config),
     brandguard: new BrandGuardAgent(config),
     replyguy: new ReplyGuyAgent(config),
-    collabfinder: new CollabFinderAgent(config)
+    collabfinder: new CollabFinderAgent(config),
+    funnelsmith: new FunnelSmithAgent(config),
+    siteforge: new SiteForgeAgent(config)
   };
 
-  // Register all agents
-  Object.values(agents).forEach(agent => {
-    registry.register(agent);
-  });
+  Object.values(agents).forEach(agent => registry.register(agent));
 
   console.log('═══════════════════════════════════════════');
   console.log('  NEXUS OS - Agent System Initialized');
@@ -46,32 +40,14 @@ function initializeAgents(config = {}) {
   return agents;
 }
 
-// Get system status
 function getSystemStatus() {
-  return {
-    agents: registry.healthCheck(),
-    timestamp: new Date()
-  };
+  return { agents: registry.healthCheck(), timestamp: new Date() };
 }
 
 module.exports = {
-  // Base classes
-  BaseAgent,
-  AgentRegistry,
-  registry,
-
-  // Individual agents
-  OracleAgent,
-  ScryerAgent,
-  ScribeAgent,
-  SentinelAgent,
-  MnemosyneAgent,
-  VulcanAgent,
-  BrandGuardAgent,
-  ReplyGuyAgent,
-  CollabFinderAgent,
-
-  // Utilities
-  initializeAgents,
-  getSystemStatus
+  BaseAgent, AgentRegistry, registry,
+  OracleAgent, ScryerAgent, ScribeAgent, SentinelAgent, MnemosyneAgent,
+  VulcanAgent, BrandGuardAgent, ReplyGuyAgent, CollabFinderAgent,
+  FunnelSmithAgent, SiteForgeAgent,
+  initializeAgents, getSystemStatus
 };
