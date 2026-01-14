@@ -688,3 +688,87 @@ app.post('/api/security/sessions/revoke-all', authenticate, async (req, res) => 
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// ENTERPRISE SERVICE
+// ═══════════════════════════════════════════
+
+const { EnterpriseService } = require('./services');
+const enterpriseService = new EnterpriseService(pool, securityService);
+
+// Create organization
+app.post('/api/org', authenticate, async (req, res) => {
+  try {
+    const result = await enterpriseService.createOrganization(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get user's organizations
+app.get('/api/orgs', authenticate, async (req, res) => {
+  try {
+    const orgs = await enterpriseService.getUserOrganizations(req.user.userId);
+    res.json({ success: true, organizations: orgs });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get organization details
+app.get('/api/org/:orgId', authenticate, async (req, res) => {
+  try {
+    const org = await enterpriseService.getOrganization(req.params.orgId);
+    const members = await enterpriseService.getOrgMembers(req.params.orgId);
+    const workspaces = await enterpriseService.getOrgWorkspaces(req.params.orgId);
+    res.json({ success: true, organization: org, members, workspaces });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Invite member
+app.post('/api/org/:orgId/invite', authenticate, async (req, res) => {
+  try {
+    const { email, role } = req.body;
+    const result = await enterpriseService.inviteMember(req.params.orgId, req.user.userId, email, role);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Accept invitation
+app.post('/api/invite/accept', authenticate, async (req, res) => {
+  try {
+    const { token } = req.body;
+    const result = await enterpriseService.acceptInvitation(token, req.user.userId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create workspace
+app.post('/api/org/:orgId/workspace', authenticate, async (req, res) => {
+  try {
+    const result = await enterpriseService.createWorkspace(req.params.orgId, req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get user's workspaces
+app.get('/api/workspaces', authenticate, async (req, res) => {
+  try {
+    const workspaces = await enterpriseService.getUserWorkspaces(req.user.userId);
+    res.json({ success: true, workspaces });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Share resource
+app.post('/api/share', authenticate, async (req, res) => {
+  try {
+    const result = await enterpriseService.shareResource(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Update member role
+app.put('/api/org/:orgId/member/:userId', authenticate, async (req, res) => {
+  try {
+    const { role } = req.body;
+    const result = await enterpriseService.updateMemberRole(req.params.orgId, req.user.userId, req.params.userId, role);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
