@@ -3,7 +3,9 @@
  */
 
 const MemoryService = require('./MemoryService');
+const KnowledgeService = require('./KnowledgeService');
 
 module.exports = {
-  MemoryService
+  MemoryService,
+  KnowledgeService
 };

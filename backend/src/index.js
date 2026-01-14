@@ -431,3 +431,70 @@ app.post('/api/memory/consolidate', authenticate, async (req, res) => {
 
 // Inject memory service into agents
 agents.mnemosyne.memoryService = memoryService;
+
+// ═══════════════════════════════════════════
+// KNOWLEDGE GRAPH SERVICE
+// ═══════════════════════════════════════════
+
+const { KnowledgeService } = require('./services');
+const knowledgeService = new KnowledgeService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+
+// Create entity
+app.post('/api/knowledge/entity', authenticate, async (req, res) => {
+  try {
+    const result = await knowledgeService.createEntity(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Find entities
+app.post('/api/knowledge/search', authenticate, async (req, res) => {
+  try {
+    const { query, limit = 10 } = req.body;
+    const entities = await knowledgeService.findEntities(req.user.userId, query, limit);
+    res.json({ success: true, entities });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get entities by type
+app.get('/api/knowledge/entities/:type', authenticate, async (req, res) => {
+  try {
+    const entities = await knowledgeService.getEntitiesByType(req.user.userId, req.params.type);
+    res.json({ success: true, entities });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create relationship
+app.post('/api/knowledge/relationship', authenticate, async (req, res) => {
+  try {
+    const result = await knowledgeService.createRelationship(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get entity graph
+app.get('/api/knowledge/graph/:entityId', authenticate, async (req, res) => {
+  try {
+    const { depth = 2 } = req.query;
+    const graph = await knowledgeService.getEntityGraph(req.user.userId, req.params.entityId, parseInt(depth));
+    res.json({ success: true, graph });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Query graph with natural language
+app.post('/api/knowledge/query', authenticate, async (req, res) => {
+  try {
+    const { question } = req.body;
+    const result = await knowledgeService.queryGraph(req.user.userId, question);
+    res.json({ success: true, ...result });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Extract entities from text (auto-populate graph)
+app.post('/api/knowledge/extract', authenticate, async (req, res) => {
+  try {
+    const { text, contextType = 'content' } = req.body;
+    const result = await knowledgeService.extractAndStore(req.user.userId, text, contextType);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
