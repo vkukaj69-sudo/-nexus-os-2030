@@ -1037,3 +1037,115 @@ app.get('/api/analytics/health', authenticate, async (req, res) => {
     res.json({ success: true, health });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// PLUGIN & AI ROUTER SERVICE
+// ═══════════════════════════════════════════
+
+const { PluginService } = require('./services');
+const pluginService = new PluginService(pool);
+
+// Get AI providers
+app.get('/api/ai/providers', authenticate, async (req, res) => {
+  try {
+    const providers = await pluginService.getUserProviders(req.user.userId);
+    res.json({ success: true, providers });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Set provider API key
+app.post('/api/ai/provider/:providerId/key', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.setUserProviderKey(req.user.userId, req.params.providerId, req.body.apiKey);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Route AI request
+app.post('/api/ai/route', authenticate, async (req, res) => {
+  try {
+    const routing = await pluginService.routeRequest(req.user.userId, req.body);
+    res.json({ success: true, routing });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create routing rule
+app.post('/api/ai/routing-rule', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.createRoutingRule(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get routing rules
+app.get('/api/ai/routing-rules', authenticate, async (req, res) => {
+  try {
+    const rules = await pluginService.getRoutingRules(req.user.userId);
+    res.json({ success: true, rules });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get plugins (marketplace)
+app.get('/api/plugins', authenticate, async (req, res) => {
+  try {
+    const plugins = await pluginService.getPlugins(req.query.category, req.query.search);
+    res.json({ success: true, plugins });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get single plugin
+app.get('/api/plugin/:pluginId', authenticate, async (req, res) => {
+  try {
+    const plugin = await pluginService.getPlugin(req.params.pluginId);
+    const reviews = await pluginService.getPluginReviews(req.params.pluginId);
+    res.json({ success: true, plugin, reviews });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create plugin (admin/developers)
+app.post('/api/plugin', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.createPlugin(req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Install plugin
+app.post('/api/plugin/:pluginId/install', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.installPlugin(req.user.userId, req.params.pluginId, req.body.config);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Uninstall plugin
+app.delete('/api/plugin/:pluginId/uninstall', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.uninstallPlugin(req.user.userId, req.params.pluginId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get user's installed plugins
+app.get('/api/plugins/installed', authenticate, async (req, res) => {
+  try {
+    const plugins = await pluginService.getUserPlugins(req.user.userId);
+    res.json({ success: true, plugins });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Toggle plugin
+app.put('/api/plugin/:pluginId/toggle', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.togglePlugin(req.user.userId, req.params.pluginId, req.body.enabled);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Add review
+app.post('/api/plugin/:pluginId/review', authenticate, async (req, res) => {
+  try {
+    const result = await pluginService.addReview(req.user.userId, req.params.pluginId, req.body.rating, req.body.review);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});

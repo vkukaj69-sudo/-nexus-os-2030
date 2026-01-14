@@ -11,6 +11,7 @@ const EnterpriseService = require('./EnterpriseService');
 const WorkflowService = require('./WorkflowService');
 const RealtimeService = require('./RealtimeService');
 const AnalyticsService = require('./AnalyticsService');
+const PluginService = require('./PluginService');
 
 module.exports = {
   MemoryService,
@@ -21,5 +22,6 @@ module.exports = {
   EnterpriseService,
   WorkflowService,
   RealtimeService,
-  AnalyticsService
+  AnalyticsService,
+  PluginService
 };
