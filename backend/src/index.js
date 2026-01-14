@@ -613,3 +613,78 @@ app.post('/api/improve/experiment', authenticate, async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// SECURITY SERVICE
+// ═══════════════════════════════════════════
+
+const { SecurityService } = require('./services');
+const securityService = new SecurityService(pool);
+
+// Create API key
+app.post('/api/security/apikey', authenticate, async (req, res) => {
+  try {
+    const { name, permissions, expiresIn } = req.body;
+    const result = await securityService.createApiKey(req.user.userId, name, permissions, expiresIn);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// List API keys
+app.get('/api/security/apikeys', authenticate, async (req, res) => {
+  try {
+    const keys = await securityService.listApiKeys(req.user.userId);
+    res.json({ success: true, keys });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Revoke API key
+app.delete('/api/security/apikey/:keyId', authenticate, async (req, res) => {
+  try {
+    const result = await securityService.revokeApiKey(req.user.userId, req.params.keyId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get audit log
+app.get('/api/security/audit', authenticate, async (req, res) => {
+  try {
+    const logs = await securityService.getAuditLog(req.user.userId, req.query);
+    res.json({ success: true, logs });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get security events
+app.get('/api/security/events', authenticate, async (req, res) => {
+  try {
+    const events = await securityService.getSecurityEvents({ userId: req.user.userId, ...req.query });
+    res.json({ success: true, events });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Grant permission
+app.post('/api/security/permission', authenticate, async (req, res) => {
+  try {
+    const result = await securityService.grantPermission(req.body.targetUserId || req.user.userId, {
+      ...req.body, grantedBy: req.user.userId
+    });
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Check permission
+app.get('/api/security/permission/check', authenticate, async (req, res) => {
+  try {
+    const { agentId, resourceType, action } = req.query;
+    const allowed = await securityService.checkPermission(req.user.userId, agentId, resourceType, action);
+    res.json({ success: true, allowed });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Revoke all sessions (logout everywhere)
+app.post('/api/security/sessions/revoke-all', authenticate, async (req, res) => {
+  try {
+    const result = await securityService.revokeAllSessions(req.user.userId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
