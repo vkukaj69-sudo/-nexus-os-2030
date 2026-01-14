@@ -844,3 +844,109 @@ app.post('/api/webhook/:endpointKey', async (req, res) => {
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// ═══════════════════════════════════════════
+// REALTIME SERVICE
+// ═══════════════════════════════════════════
+
+const { RealtimeService } = require('./services');
+const realtimeService = new RealtimeService(pool);
+
+// Get notifications
+app.get('/api/notifications', authenticate, async (req, res) => {
+  try {
+    const notifications = await realtimeService.getNotifications(req.user.userId, req.query.unread === 'true');
+    const unreadCount = await realtimeService.getUnreadCount(req.user.userId);
+    res.json({ success: true, notifications, unreadCount });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create notification (internal/admin)
+app.post('/api/notification', authenticate, async (req, res) => {
+  try {
+    const result = await realtimeService.createNotification(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Mark notification as read
+app.put('/api/notification/:notifId/read', authenticate, async (req, res) => {
+  try {
+    const result = await realtimeService.markAsRead(req.user.userId, req.params.notifId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Mark all as read
+app.put('/api/notifications/read-all', authenticate, async (req, res) => {
+  try {
+    const result = await realtimeService.markAllAsRead(req.user.userId);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get notification settings
+app.get('/api/notifications/settings', authenticate, async (req, res) => {
+  try {
+    const settings = await realtimeService.getSettings(req.user.userId);
+    res.json({ success: true, settings });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Update notification settings
+app.put('/api/notifications/settings', authenticate, async (req, res) => {
+  try {
+    const result = await realtimeService.updateSettings(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Create channel
+app.post('/api/channel', authenticate, async (req, res) => {
+  try {
+    const result = await realtimeService.createChannel(req.user.userId, req.body);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get user channels
+app.get('/api/channels', authenticate, async (req, res) => {
+  try {
+    const channels = await realtimeService.getUserChannels(req.user.userId);
+    res.json({ success: true, channels });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Send message to channel
+app.post('/api/channel/:channelId/message', authenticate, async (req, res) => {
+  try {
+    const { content, messageType, metadata } = req.body;
+    const result = await realtimeService.sendMessage(req.user.userId, req.params.channelId, content, messageType, metadata);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get channel messages
+app.get('/api/channel/:channelId/messages', authenticate, async (req, res) => {
+  try {
+    const messages = await realtimeService.getChannelMessages(req.params.channelId, req.query.limit || 50);
+    res.json({ success: true, messages });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Get agent statuses
+app.get('/api/agents/status', authenticate, async (req, res) => {
+  try {
+    const statuses = await realtimeService.getAgentStatuses(req.user.userId);
+    res.json({ success: true, statuses });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Update agent status
+app.put('/api/agent/:agentId/status', authenticate, async (req, res) => {
+  try {
+    const { status, currentTask, progress } = req.body;
+    const result = await realtimeService.updateAgentStatus(req.user.userId, req.params.agentId, status, currentTask, progress);
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});

@@ -9,6 +9,7 @@ const SelfImprovementService = require('./SelfImprovementService');
 const SecurityService = require('./SecurityService');
 const EnterpriseService = require('./EnterpriseService');
 const WorkflowService = require('./WorkflowService');
+const RealtimeService = require('./RealtimeService');
 
 module.exports = {
   MemoryService,
@@ -17,5 +18,6 @@ module.exports = {
   SelfImprovementService,
   SecurityService,
   EnterpriseService,
-  WorkflowService
+  WorkflowService,
+  RealtimeService
 };
