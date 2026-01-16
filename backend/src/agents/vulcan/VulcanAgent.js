@@ -288,11 +288,6 @@ class VulcanAgent extends BaseAgent {
       console.log('[Vulcan] Operation data:', JSON.stringify(data).substring(0, 500));
 
       if (data.done) {
-        // Handle various response formats from Veo 2
-        const videoUrl = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
-          || data.response?.predictions?.[0]?.video?.uri
-          || data.response?.generatedSamples?.[0]?.video?.uri;
-
         // Check for errors in the response
         if (data.error) {
           return {
@@ -303,10 +298,40 @@ class VulcanAgent extends BaseAgent {
           };
         }
 
+        // Veo 2 returns video as base64 encoded data
+        const base64Video = data.response?.videos?.[0]?.bytesBase64Encoded;
+        if (base64Video) {
+          // Return as data URL for direct playback
+          const videoUrl = `data:video/mp4;base64,${base64Video}`;
+          console.log('[Vulcan] Video generated successfully, size:', base64Video.length, 'chars');
+          return {
+            success: true,
+            status: 'complete',
+            videoUrl,
+            operationId: operationName
+          };
+        }
+
+        // Fallback: check for URI-based response
+        const videoUri = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+          || data.response?.predictions?.[0]?.video?.uri
+          || data.response?.generatedSamples?.[0]?.video?.uri;
+
+        if (videoUri) {
+          return {
+            success: true,
+            status: 'complete',
+            videoUrl: videoUri,
+            operationId: operationName
+          };
+        }
+
+        // No video found in response
+        console.error('[Vulcan] No video in response:', JSON.stringify(data.response).substring(0, 500));
         return {
-          success: true,
-          status: 'complete',
-          videoUrl,
+          success: false,
+          status: 'failed',
+          error: 'No video in response',
           operationId: operationName
         };
       }
