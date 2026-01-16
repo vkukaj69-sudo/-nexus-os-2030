@@ -247,7 +247,7 @@ class VulcanAgent extends BaseAgent {
   }
 
   // Check video generation operation status
-  async checkVideoOperation(operationId) {
+  async checkVideoOperation(operationName) {
     try {
       const { GoogleAuth } = require('google-auth-library');
       const auth = new GoogleAuth({
@@ -256,7 +256,13 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationId}`;
+      // Extract operation UUID from full operation name
+      // Format: projects/.../operations/{uuid}
+      const opMatch = operationName.match(/operations\/([a-f0-9-]+)$/);
+      const operationUuid = opMatch ? opMatch[1] : operationName;
+
+      // Use standard Vertex AI operations endpoint
+      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/operations/${operationUuid}`;
       console.log('[Vulcan] Checking operation status:', url);
 
       const response = await fetch(url, {
@@ -281,20 +287,33 @@ class VulcanAgent extends BaseAgent {
       console.log('[Vulcan] Operation data:', JSON.stringify(data).substring(0, 500));
 
       if (data.done) {
+        // Handle various response formats from Veo 2
         const videoUrl = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
-          || data.response?.predictions?.[0]?.video?.uri;
+          || data.response?.predictions?.[0]?.video?.uri
+          || data.response?.generatedSamples?.[0]?.video?.uri;
+
+        // Check for errors in the response
+        if (data.error) {
+          return {
+            success: false,
+            status: 'failed',
+            error: data.error.message || 'Video generation failed',
+            operationId: operationName
+          };
+        }
+
         return {
           success: true,
           status: 'complete',
           videoUrl,
-          operationId
+          operationId: operationName
         };
       }
 
       return {
         success: true,
         status: 'processing',
-        operationId,
+        operationId: operationName,
         progress: data.metadata?.progressPercent || 0
       };
     } catch (error) {
