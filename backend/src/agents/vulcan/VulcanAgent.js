@@ -256,16 +256,33 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      const response = await fetch(`https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationId}`, {
+      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationId}`;
+      console.log('[Vulcan] Checking operation status:', url);
+
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${accessToken.token}`
         }
       });
 
+      console.log('[Vulcan] Operation status response:', response.status);
+
+      // Check if response is OK before parsing
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('[Vulcan] Operation status error:', response.status, text.substring(0, 500));
+        return {
+          success: false,
+          error: `Google API error: ${response.status} - ${text.substring(0, 200)}`
+        };
+      }
+
       const data = await response.json();
+      console.log('[Vulcan] Operation data:', JSON.stringify(data).substring(0, 500));
 
       if (data.done) {
-        const videoUrl = data.response?.predictions?.[0]?.video?.uri;
+        const videoUrl = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+          || data.response?.predictions?.[0]?.video?.uri;
         return {
           success: true,
           status: 'complete',
@@ -281,6 +298,7 @@ class VulcanAgent extends BaseAgent {
         progress: data.metadata?.progressPercent || 0
       };
     } catch (error) {
+      console.error('[Vulcan] checkVideoOperation error:', error);
       return {
         success: false,
         error: error.message
