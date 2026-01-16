@@ -256,15 +256,20 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      // Veo 2 uses the full operation name as the endpoint path
-      // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{uuid}
-      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationName}`;
+      // Veo 2 requires fetchPredictOperation method to check status
+      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-001:fetchPredictOperation`;
       console.log('[Vulcan] Checking operation status:', url);
+      console.log('[Vulcan] Operation name:', operationName);
 
       const response = await fetch(url, {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken.token}`
-        }
+          'Authorization': `Bearer ${accessToken.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          operationName: operationName
+        })
       });
 
       console.log('[Vulcan] Operation status response:', response.status);
