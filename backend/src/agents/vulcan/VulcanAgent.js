@@ -132,7 +132,10 @@ class VulcanAgent extends BaseAgent {
   }
 
   async generateVideo(payload) {
-    const { prompt, duration = 5, style = 'cinematic', aspectRatio = '16:9' } = payload;
+    const { prompt, duration = 6, style = 'cinematic', aspectRatio = '16:9' } = payload;
+
+    // Veo 3.1 supports 4, 6, or 8 seconds
+    const validDuration = [4, 6, 8].includes(duration) ? duration : 6;
 
     // Check if Google Cloud is configured
     if (!this.googleProjectId) {
@@ -140,7 +143,7 @@ class VulcanAgent extends BaseAgent {
         type: 'video_generate',
         success: false,
         error: 'Google Cloud not configured',
-        suggestion: 'Add GOOGLE_CLOUD_PROJECT to environment variables for Veo 2 video generation',
+        suggestion: 'Add GOOGLE_CLOUD_PROJECT to environment variables for Veo 3.1 video generation',
         placeholder: {
           message: 'Video generation ready when Google Cloud configured',
           prompt,
@@ -159,14 +162,14 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      // Veo 2 via Vertex AI Generative Media API
-      // Model: veo-2.0-generate-001 (GA version)
-      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-001:predictLongRunning`;
+      // Veo 3.1 via Vertex AI Generative Media API
+      // Model: veo-3.1-generate-001 (with native audio)
+      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-3.1-generate-001:predictLongRunning`;
 
       // Enhance prompt with style
-      const enhancedPrompt = `${prompt}. Style: ${style}, cinematic quality, 4K resolution`;
+      const enhancedPrompt = `${prompt}. Style: ${style}, cinematic quality, 1080p HD`;
 
-      console.log('[Vulcan] Veo 2 request:', { endpoint, prompt: enhancedPrompt, duration, aspectRatio });
+      console.log('[Vulcan] Veo 3.1 request:', { endpoint, prompt: enhancedPrompt, duration: validDuration, aspectRatio });
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -180,7 +183,7 @@ class VulcanAgent extends BaseAgent {
           }],
           parameters: {
             aspectRatio: aspectRatio,
-            durationSeconds: duration,
+            durationSeconds: validDuration,
             sampleCount: 1
           }
         })
@@ -188,8 +191,8 @@ class VulcanAgent extends BaseAgent {
 
       // Log raw response for debugging
       const responseText = await response.text();
-      console.log('[Vulcan] Veo 2 response status:', response.status);
-      console.log('[Vulcan] Veo 2 response:', responseText.substring(0, 500));
+      console.log('[Vulcan] Veo 3.1 response status:', response.status);
+      console.log('[Vulcan] Veo 3.1 response:', responseText.substring(0, 500));
 
       let data;
       try {
@@ -256,8 +259,8 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      // Veo 2 requires fetchPredictOperation method to check status
-      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-001:fetchPredictOperation`;
+      // Veo 3.1 requires fetchPredictOperation method to check status
+      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-3.1-generate-001:fetchPredictOperation`;
       console.log('[Vulcan] Checking operation status:', url);
       console.log('[Vulcan] Operation name:', operationName);
 
