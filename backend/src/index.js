@@ -231,7 +231,7 @@ app.post('/api/oracle/synthesize', authenticate, async (req, res) => {
 
     res.json({
       success: true,
-      output: result.content,
+      output: result.result?.content || result.content,
       platform,
       timestamp: result.timestamp
     });
