@@ -16,7 +16,7 @@ class VulcanAgent extends BaseAgent {
     });
 
     this.openaiKey = config.openaiKey || process.env.OPENAI_API_KEY;
-    this.googleProjectId = config.googleProjectId || process.env.GOOGLE_CLOUD_PROJECT;
+    this.googleProjectId = config.googleProjectId || process.env.GOOGLE_CLOUD_PROJECT || 'nexus-production-483901';
     this.googleLocation = config.googleLocation || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
     this.mediaHistory = [];
   }
