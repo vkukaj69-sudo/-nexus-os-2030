@@ -160,7 +160,7 @@ class VulcanAgent extends BaseAgent {
       const accessToken = await client.getAccessToken();
 
       // Veo 2 via Vertex AI Generative Media API
-      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2:generateVideo`;
+      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-preview:predictLongRunning`;
 
       // Enhance prompt with style
       const enhancedPrompt = `${prompt}. Style: ${style}, cinematic quality, 4K resolution`;
