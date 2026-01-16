@@ -303,43 +303,62 @@ Return ONLY the JSON array, no other text.`;
 });
 
 // ═══════════════════════════════════════════
-// VIDEO GENERATION (used by VideoStudio)
+// VIDEO GENERATION (Veo 2 - 4K)
 // ═══════════════════════════════════════════
 
 app.post('/api/video/generate', authenticate, async (req, res) => {
   try {
     const vulcan = registry.get('vulcan_01');
-    const { prompt, aspectRatio, model } = req.body;
+    const { prompt, aspectRatio = '16:9', duration = 5 } = req.body;
 
-    // Convert aspect ratio to duration style hints
+    // Style hints based on aspect ratio
     const isVertical = aspectRatio === '9:16';
-    const styleHint = isVertical ? 'vertical format, mobile-first, social media style' : 'cinematic widescreen';
+    const styleHint = isVertical
+      ? 'vertical format, mobile-first, social media style, 4K quality'
+      : 'cinematic widescreen, 4K quality';
 
     const result = await vulcan.processTask({
       type: 'video_generate',
       payload: {
         prompt: `${prompt}. ${styleHint}`,
-        duration: 4,
+        duration: Math.min(duration, 8), // Veo 2 supports up to 8 seconds
+        aspectRatio,
         style: 'cinematic'
       }
     });
 
-    if (result.success) {
+    const taskResult = result.result || result;
+
+    if (taskResult.success) {
       res.json({
         success: true,
-        videoUrl: result.videoUrl,
+        status: taskResult.status || 'complete',
+        videoUrl: taskResult.videoUrl,
+        operationId: taskResult.operationId,
         prompt,
-        aspectRatio
+        aspectRatio,
+        resolution: '4K',
+        duration: taskResult.duration
       });
     } else {
-      // If video API not configured, return placeholder info
       res.json({
         success: false,
-        error: result.error || 'Video generation not available',
-        suggestion: result.suggestion,
+        error: taskResult.error || 'Video generation not available',
+        suggestion: taskResult.suggestion,
         videoUrl: null
       });
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check video generation status (for async Veo 2 operations)
+app.get('/api/video/status/:operationId', authenticate, async (req, res) => {
+  try {
+    const vulcan = registry.get('vulcan_01');
+    const result = await vulcan.checkVideoOperation(req.params.operationId);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -1,7 +1,7 @@
 /**
  * NEXUS OS - Vulcan Agent
  * Media Generation - Images, Video, Thumbnails
- * Integrates with DALL-E, Runway, Canva APIs
+ * Integrates with DALL-E, Google Veo 2 APIs
  */
 
 const BaseAgent = require('../BaseAgent');
@@ -16,7 +16,8 @@ class VulcanAgent extends BaseAgent {
     });
 
     this.openaiKey = config.openaiKey || process.env.OPENAI_API_KEY;
-    this.runwayKey = config.runwayKey || process.env.RUNWAY_API_KEY;
+    this.googleProjectId = config.googleProjectId || process.env.GOOGLE_CLOUD_PROJECT;
+    this.googleLocation = config.googleLocation || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
     this.mediaHistory = [];
   }
 
@@ -131,17 +132,17 @@ class VulcanAgent extends BaseAgent {
   }
 
   async generateVideo(payload) {
-    const { prompt, duration = 4, style = 'cinematic' } = payload;
+    const { prompt, duration = 5, style = 'cinematic', aspectRatio = '16:9' } = payload;
 
-    // Check if Runway API is available
-    if (!this.runwayKey) {
+    // Check if Google Cloud is configured
+    if (!this.googleProjectId) {
       return {
         type: 'video_generate',
         success: false,
-        error: 'Runway API key not configured',
-        suggestion: 'Add RUNWAY_API_KEY to environment variables for video generation',
+        error: 'Google Cloud not configured',
+        suggestion: 'Add GOOGLE_CLOUD_PROJECT to environment variables for Veo 2 video generation',
         placeholder: {
-          message: 'Video generation ready when API configured',
+          message: 'Video generation ready when Google Cloud configured',
           prompt,
           duration,
           style
@@ -151,28 +152,74 @@ class VulcanAgent extends BaseAgent {
     }
 
     try {
-      // Runway ML Gen-3 API integration
-      const response = await fetch('https://api.runwayml.com/v1/generate', {
+      const { GoogleAuth } = require('google-auth-library');
+      const auth = new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/cloud-platform']
+      });
+      const client = await auth.getClient();
+      const accessToken = await client.getAccessToken();
+
+      // Veo 2 via Vertex AI Generative Media API
+      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2:generateVideo`;
+
+      // Enhance prompt with style
+      const enhancedPrompt = `${prompt}. Style: ${style}, cinematic quality, 4K resolution`;
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.runwayKey}`,
+          'Authorization': `Bearer ${accessToken.token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          prompt: prompt,
-          duration: duration,
-          style: style
+          instances: [{
+            prompt: enhancedPrompt
+          }],
+          parameters: {
+            aspectRatio: aspectRatio,
+            durationSeconds: duration,
+            personGeneration: 'allow_adult',
+            outputOptions: {
+              quality: 'high'
+            }
+          }
         })
       });
 
       const data = await response.json();
 
+      if (data.error) {
+        throw new Error(data.error.message || 'Veo 2 generation failed');
+      }
+
+      // Veo 2 returns an operation for async generation
+      if (data.name) {
+        // Return operation ID for polling
+        const result = {
+          type: 'video_generate',
+          success: true,
+          status: 'processing',
+          operationId: data.name,
+          prompt: enhancedPrompt,
+          duration,
+          aspectRatio,
+          timestamp: new Date()
+        };
+        this.mediaHistory.push(result);
+        return result;
+      }
+
+      // If immediate result available
+      const videoUrl = data.predictions?.[0]?.video?.uri || data.predictions?.[0]?.videoUri;
+
       const result = {
         type: 'video_generate',
         success: true,
-        prompt,
-        videoUrl: data.url,
+        prompt: enhancedPrompt,
+        videoUrl,
         duration,
+        aspectRatio,
+        resolution: '4K',
         timestamp: new Date()
       };
 
@@ -185,6 +232,48 @@ class VulcanAgent extends BaseAgent {
         success: false,
         error: error.message,
         timestamp: new Date()
+      };
+    }
+  }
+
+  // Check video generation operation status
+  async checkVideoOperation(operationId) {
+    try {
+      const { GoogleAuth } = require('google-auth-library');
+      const auth = new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/cloud-platform']
+      });
+      const client = await auth.getClient();
+      const accessToken = await client.getAccessToken();
+
+      const response = await fetch(`https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationId}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken.token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.done) {
+        const videoUrl = data.response?.predictions?.[0]?.video?.uri;
+        return {
+          success: true,
+          status: 'complete',
+          videoUrl,
+          operationId
+        };
+      }
+
+      return {
+        success: true,
+        status: 'processing',
+        operationId,
+        progress: data.metadata?.progressPercent || 0
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
       };
     }
   }
@@ -228,7 +317,7 @@ class VulcanAgent extends BaseAgent {
       ...super.toJSON(),
       mediaGenerated: this.mediaHistory.length,
       openaiConfigured: !!this.openaiKey,
-      runwayConfigured: !!this.runwayKey
+      veo2Configured: !!this.googleProjectId
     };
   }
 }
