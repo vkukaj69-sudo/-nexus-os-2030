@@ -184,7 +184,8 @@ class VulcanAgent extends BaseAgent {
           parameters: {
             aspectRatio: aspectRatio,
             durationSeconds: validDuration,
-            sampleCount: 1
+            sampleCount: 1,
+            generateAudio: true
           }
         })
       });
