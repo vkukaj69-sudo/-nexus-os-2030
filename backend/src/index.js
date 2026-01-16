@@ -27,6 +27,30 @@ const PORT = process.env.PORT || 3001;
 // Database
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// Auto-migration: Create tables if they don't exist
+const runMigrations = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usage_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        action_type VARCHAR(100) NOT NULL,
+        module VARCHAR(100) NOT NULL,
+        metadata JSONB DEFAULT '{}',
+        tokens_used INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_module ON usage_logs(module)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at)`);
+    console.log('[Migration] usage_logs table ready');
+  } catch (err) {
+    console.error('[Migration] Error:', err.message);
+  }
+};
+runMigrations();
+
 // Redis
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   maxRetriesPerRequest: null
