@@ -354,12 +354,15 @@ app.post('/api/video/generate', authenticate, async (req, res) => {
 });
 
 // Check video generation status (for async Veo 2 operations)
-// Using wildcard (*) to capture operation paths with slashes
-app.get('/api/video/status/*', authenticate, async (req, res) => {
+// Using query param to avoid URL path encoding issues
+app.get('/api/video/status', authenticate, async (req, res) => {
   try {
     const vulcan = registry.get('vulcan_01');
-    // req.params[0] contains everything after /status/
-    const operationId = req.params[0];
+    const operationId = req.query.op;
+    if (!operationId) {
+      return res.status(400).json({ error: 'Missing operation ID' });
+    }
+    console.log('[Video Status] Checking operation:', operationId);
     const result = await vulcan.checkVideoOperation(operationId);
     res.json(result);
   } catch (error) {
