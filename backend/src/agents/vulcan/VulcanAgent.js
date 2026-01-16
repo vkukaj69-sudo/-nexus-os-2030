@@ -256,13 +256,9 @@ class VulcanAgent extends BaseAgent {
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
 
-      // Extract operation UUID from full operation name
-      // Format: projects/.../operations/{uuid}
-      const opMatch = operationName.match(/operations\/([a-f0-9-]+)$/);
-      const operationUuid = opMatch ? opMatch[1] : operationName;
-
-      // Use standard Vertex AI operations endpoint
-      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/operations/${operationUuid}`;
+      // Veo 2 uses the full operation name as the endpoint path
+      // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{uuid}
+      const url = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/${operationName}`;
       console.log('[Vulcan] Checking operation status:', url);
 
       const response = await fetch(url, {
