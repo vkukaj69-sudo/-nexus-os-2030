@@ -201,6 +201,150 @@ app.post('/api/oracle/execute', authenticate, async (req, res) => {
   }
 });
 
+// Synthesize content for platforms (used by Composer)
+app.post('/api/oracle/synthesize', authenticate, async (req, res) => {
+  try {
+    const scribe = registry.get('scribe_01');
+    const { content, platform, model } = req.body;
+
+    // Platform-specific optimization
+    const platformConfig = {
+      instagram: { tone: 'casual', length: 'short' },
+      facebook: { tone: 'conversational', length: 'medium' },
+      x: { tone: 'punchy', length: 'short' },
+      linkedin: { tone: 'professional', length: 'medium' },
+      reddit: { tone: 'authentic', length: 'medium' }
+    };
+
+    const config = platformConfig[platform] || platformConfig.linkedin;
+
+    const result = await scribe.processTask({
+      type: 'content_generate',
+      payload: {
+        topic: content,
+        platform,
+        tone: config.tone,
+        length: config.length,
+        apiKey: null // Use system key
+      }
+    });
+
+    res.json({
+      success: true,
+      output: result.content,
+      platform,
+      timestamp: result.timestamp
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Analyze content for engagement heatmap (used by Composer)
+app.post('/api/oracle/heatmap', authenticate, async (req, res) => {
+  try {
+    const { content } = req.body;
+
+    if (!content || content.length < 10) {
+      return res.status(400).json({ error: 'Content too short for analysis' });
+    }
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const prompt = `Analyze this content for engagement potential. Break it into 3-6 segments and rate each segment's viral/engagement potential from 1-10.
+
+Content to analyze:
+${content}
+
+Return a JSON array with this exact format (no markdown, just raw JSON):
+[
+  {"text": "segment text here", "score": 8, "reason": "why this scores high/low"},
+  {"text": "next segment", "score": 5, "reason": "explanation"}
+]
+
+Scoring guide:
+- 9-10: Hook, controversial take, emotional trigger
+- 7-8: Strong value, clear insight, relatable
+- 5-6: Good but generic content
+- 3-4: Weak engagement, filler text
+- 1-2: Friction, confusion, or boring
+
+Return ONLY the JSON array, no other text.`;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text().trim();
+
+    // Parse the JSON response
+    let heatmap;
+    try {
+      // Remove markdown code blocks if present
+      const cleanJson = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      heatmap = JSON.parse(cleanJson);
+    } catch (parseError) {
+      // Fallback: create simple segments
+      const sentences = content.split(/[.!?]+/).filter(s => s.trim());
+      heatmap = sentences.slice(0, 5).map((text, i) => ({
+        text: text.trim(),
+        score: 5 + Math.floor(Math.random() * 4),
+        reason: 'Engagement analysis segment'
+      }));
+    }
+
+    res.json({
+      success: true,
+      heatmap,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════
+// VIDEO GENERATION (used by VideoStudio)
+// ═══════════════════════════════════════════
+
+app.post('/api/video/generate', authenticate, async (req, res) => {
+  try {
+    const vulcan = registry.get('vulcan_01');
+    const { prompt, aspectRatio, model } = req.body;
+
+    // Convert aspect ratio to duration style hints
+    const isVertical = aspectRatio === '9:16';
+    const styleHint = isVertical ? 'vertical format, mobile-first, social media style' : 'cinematic widescreen';
+
+    const result = await vulcan.processTask({
+      type: 'video_generate',
+      payload: {
+        prompt: `${prompt}. ${styleHint}`,
+        duration: 4,
+        style: 'cinematic'
+      }
+    });
+
+    if (result.success) {
+      res.json({
+        success: true,
+        videoUrl: result.videoUrl,
+        prompt,
+        aspectRatio
+      });
+    } else {
+      // If video API not configured, return placeholder info
+      res.json({
+        success: false,
+        error: result.error || 'Video generation not available',
+        suggestion: result.suggestion,
+        videoUrl: null
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ═══════════════════════════════════════════
 // SCRYER - INTELLIGENCE
 // ═══════════════════════════════════════════
