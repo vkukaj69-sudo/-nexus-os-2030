@@ -160,10 +160,13 @@ class VulcanAgent extends BaseAgent {
       const accessToken = await client.getAccessToken();
 
       // Veo 2 via Vertex AI Generative Media API
-      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-preview:predictLongRunning`;
+      // Model: veo-2.0-generate-001 (GA version)
+      const endpoint = `https://${this.googleLocation}-aiplatform.googleapis.com/v1/projects/${this.googleProjectId}/locations/${this.googleLocation}/publishers/google/models/veo-2.0-generate-001:predictLongRunning`;
 
       // Enhance prompt with style
       const enhancedPrompt = `${prompt}. Style: ${style}, cinematic quality, 4K resolution`;
+
+      console.log('[Vulcan] Veo 2 request:', { endpoint, prompt: enhancedPrompt, duration, aspectRatio });
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -178,15 +181,22 @@ class VulcanAgent extends BaseAgent {
           parameters: {
             aspectRatio: aspectRatio,
             durationSeconds: duration,
-            personGeneration: 'allow_adult',
-            outputOptions: {
-              quality: 'high'
-            }
+            sampleCount: 1
           }
         })
       });
 
-      const data = await response.json();
+      // Log raw response for debugging
+      const responseText = await response.text();
+      console.log('[Vulcan] Veo 2 response status:', response.status);
+      console.log('[Vulcan] Veo 2 response:', responseText.substring(0, 500));
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        throw new Error(`Veo 2 returned invalid JSON: ${responseText.substring(0, 200)}`);
+      }
 
       if (data.error) {
         throw new Error(data.error.message || 'Veo 2 generation failed');
