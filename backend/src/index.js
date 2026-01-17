@@ -389,6 +389,22 @@ app.post('/api/scryer/analyze', authenticate, async (req, res) => {
   }
 });
 
+// Google Trends endpoint
+app.post('/api/scryer/trends', authenticate, async (req, res) => {
+  try {
+    const scryer = registry.get('scryer_01');
+    const { keyword, keywords, geo, timeframe } = req.body;
+
+    const result = await scryer.processTask({
+      type: 'google_trends',
+      payload: { keyword, keywords, geo, timeframe }
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ═══════════════════════════════════════════
 // SCRIBE - CONTENT
 // ═══════════════════════════════════════════
