@@ -173,7 +173,12 @@ app.post('/api/agents/:id/task', authenticate, async (req, res) => {
     const agent = registry.get(req.params.id);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-    const { type, payload } = req.body;
+    // Support both {type, payload} and {operation, ...rest} formats
+    const type = req.body.type || req.body.operation;
+    const payload = req.body.payload || { ...req.body };
+    delete payload.type;
+    delete payload.operation;
+
     payload.userId = req.user.userId;
     payload.apiKey = payload.apiKey || null;
 
@@ -191,7 +196,9 @@ app.post('/api/agents/:id/task', authenticate, async (req, res) => {
 app.post('/api/oracle/execute', authenticate, async (req, res) => {
   try {
     const oracle = registry.get('oracle_core');
-    const { task, payload } = req.body;
+    const { task } = req.body;
+    const payload = req.body.payload || { ...req.body };
+    delete payload.task;
     payload.userId = req.user.userId;
 
     const result = await oracle.processTask({ type: task, payload });
@@ -584,9 +591,13 @@ const memoryService = new MemoryService(pool, { geminiKey: process.env.GEMINI_AP
 // Memory endpoints
 app.post('/api/memory/store', authenticate, async (req, res) => {
   try {
-    const { type, data } = req.body;
+    const { type } = req.body;
     const userId = req.user.userId;
-    
+
+    // Support both {type, data} and {type, content, ...rest} formats
+    const data = req.body.data || { ...req.body };
+    delete data.type;
+
     let result;
     switch (type) {
       case 'episodic':
@@ -599,17 +610,21 @@ app.post('/api/memory/store', authenticate, async (req, res) => {
         result = await memoryService.storeProcedural(userId, data);
         break;
       default:
-        return res.status(400).json({ error: 'Invalid memory type' });
+        return res.status(400).json({ error: 'Invalid memory type. Use: episodic, semantic, or procedural' });
     }
-    res.json(result);
+    res.json({ success: true, ...result });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/memory/recall', authenticate, async (req, res) => {
   try {
-    const { type, query, agentId, limit = 5 } = req.body;
+    const { type = 'context', query, agentId, limit = 5 } = req.body;
     const userId = req.user.userId;
-    
+
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
     let result;
     switch (type) {
       case 'episodic':
@@ -624,8 +639,16 @@ app.post('/api/memory/recall', authenticate, async (req, res) => {
       case 'context':
         result = await memoryService.buildContext(userId, query, agentId);
         break;
+      case 'all':
+        // Search all memory types
+        const [episodic, semantic] = await Promise.all([
+          memoryService.recallEpisodic(userId, query, limit),
+          memoryService.recallSemantic(userId, query, limit)
+        ]);
+        result = { episodic, semantic };
+        break;
       default:
-        return res.status(400).json({ error: 'Invalid memory type' });
+        return res.status(400).json({ error: 'Invalid memory type. Use: episodic, semantic, procedural, context, or all' });
     }
     res.json({ success: true, memories: result });
   } catch (error) { res.status(500).json({ error: error.message }); }
