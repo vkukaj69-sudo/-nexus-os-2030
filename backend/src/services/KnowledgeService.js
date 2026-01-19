@@ -195,7 +195,7 @@ class KnowledgeService {
   // ═══════════════════════════════════════════
 
   async extractAndStore(userId, text, contextType = 'content') {
-    const model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = this.genAI.getGenerativeModel({ model: 'gemini-3-flash' });
     
     const prompt = `Extract entities and relationships from this text. Return JSON only:
 {

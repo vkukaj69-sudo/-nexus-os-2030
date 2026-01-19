@@ -96,6 +96,6 @@ CREATE INDEX IF NOT EXISTS idx_reviews_plugin ON plugin_reviews(plugin_id);
 INSERT INTO ai_providers (name, provider_type, base_url, models, default_model) VALUES
 ('OpenAI', 'openai', 'https://api.openai.com/v1', '["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]', 'gpt-4o'),
 ('Anthropic', 'anthropic', 'https://api.anthropic.com/v1', '["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"]', 'claude-3-sonnet'),
-('Google AI', 'google', 'https://generativelanguage.googleapis.com/v1', '["gemini-2.0-flash", "gemini-pro"]', 'gemini-2.0-flash'),
+('Google AI', 'google', 'https://generativelanguage.googleapis.com/v1', '["gemini-3-flash", "gemini-3-pro"]', 'gemini-3-flash'),
 ('Local/Ollama', 'local', 'http://localhost:11434', '["llama2", "mistral", "codellama"]', 'llama2')
 ON CONFLICT (name) DO NOTHING;

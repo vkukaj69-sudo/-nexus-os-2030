@@ -30,6 +30,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Auto-migration: Create tables if they don't exist
 const runMigrations = async () => {
   try {
+    // Usage logs
     await pool.query(`
       CREATE TABLE IF NOT EXISTS usage_logs (
         id SERIAL PRIMARY KEY,
@@ -45,6 +46,204 @@ const runMigrations = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_module ON usage_logs(module)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at)`);
     console.log('[Migration] usage_logs table ready');
+
+    // Insurance Policies
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS insurance_policies (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        policy_type VARCHAR(100) NOT NULL,
+        provider VARCHAR(200),
+        policy_number VARCHAR(100),
+        coverage_limit DECIMAL(15,2) DEFAULT 0,
+        deductible DECIMAL(15,2) DEFAULT 0,
+        premium_annual DECIMAL(15,2) DEFAULT 0,
+        effective_date DATE,
+        expiration_date DATE,
+        policy_status VARCHAR(50) DEFAULT 'active',
+        coverage_details JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] insurance_policies table ready');
+
+    // Coverage Gaps
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS coverage_gaps (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        gap_type VARCHAR(100),
+        severity VARCHAR(20) DEFAULT 'medium',
+        description TEXT,
+        recommendation TEXT,
+        estimated_cost VARCHAR(100),
+        risk_exposure TEXT,
+        resolved BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] coverage_gaps table ready');
+
+    // Legal Advice History
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS legal_advice_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        query TEXT NOT NULL,
+        advice TEXT,
+        category VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] legal_advice_history table ready');
+
+    // Error Logs (Agent Zero)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS error_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        error_type VARCHAR(100),
+        error_message TEXT,
+        stack_trace TEXT,
+        context JSONB DEFAULT '{}',
+        resolved BOOLEAN DEFAULT FALSE,
+        resolution TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] error_logs table ready');
+
+    // Security Threats
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS security_threats (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        threat_type VARCHAR(100),
+        severity VARCHAR(20) DEFAULT 'medium',
+        source VARCHAR(200),
+        details JSONB DEFAULT '{}',
+        status VARCHAR(50) DEFAULT 'active',
+        mitigated_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] security_threats table ready');
+
+    // Soul Snapshots (Backups)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS soul_snapshots (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        snapshot_type VARCHAR(50) DEFAULT 'full',
+        snapshot_data JSONB NOT NULL,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] soul_snapshots table ready');
+
+    // Alert History
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS alert_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        alert_type VARCHAR(50),
+        level VARCHAR(20) DEFAULT 'info',
+        message TEXT,
+        channel VARCHAR(50),
+        recipient VARCHAR(200),
+        status VARCHAR(50) DEFAULT 'sent',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] alert_history table ready');
+
+    // Alert Channels Config
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS alert_channels (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        channel VARCHAR(50) NOT NULL,
+        enabled BOOLEAN DEFAULT TRUE,
+        config JSONB DEFAULT '{}'
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_channels_unique ON alert_channels(user_id, channel)`);
+    console.log('[Migration] alert_channels table ready');
+
+    // Shadow Actors
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS shadow_actors (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        actor_type VARCHAR(100) DEFAULT 'contract_executor',
+        autonomy_level VARCHAR(50) DEFAULT 'supervised',
+        delegation_scope JSONB DEFAULT '{}',
+        status VARCHAR(50) DEFAULT 'inactive',
+        last_action_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] shadow_actors table ready');
+
+    // Smart Contracts
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS smart_contracts (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        contract_type VARCHAR(100),
+        terms JSONB NOT NULL,
+        parties JSONB NOT NULL,
+        execution_conditions JSONB DEFAULT '{}',
+        auto_renew BOOLEAN DEFAULT FALSE,
+        status VARCHAR(50) DEFAULT 'draft',
+        executed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] smart_contracts table ready');
+
+    // D&O Shield
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS dno_shields (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        shield_type VARCHAR(100) DEFAULT 'executive_standard',
+        coverage_amount DECIMAL(15,2) DEFAULT 1000000,
+        status VARCHAR(50) DEFAULT 'pending',
+        provisioned_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] dno_shields table ready');
+
+    // Yield Streams
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS yield_streams (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        source_type VARCHAR(100),
+        extraction_rate DECIMAL(10,6) DEFAULT 0.0001,
+        payout_threshold DECIMAL(15,2) DEFAULT 100,
+        total_extracted DECIMAL(15,2) DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] yield_streams table ready');
+
+    // Yield Extractions
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS yield_extractions (
+        id SERIAL PRIMARY KEY,
+        stream_id INTEGER REFERENCES yield_streams(id) ON DELETE CASCADE,
+        amount DECIMAL(15,2),
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] yield_extractions table ready');
+
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   }
@@ -258,7 +457,7 @@ app.post('/api/oracle/heatmap', authenticate, async (req, res) => {
 
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash' });
 
     const prompt = `Analyze this content for engagement potential. Break it into 3-6 segments and rate each segment's viral/engagement potential from 1-10.
 
@@ -1380,4 +1579,928 @@ app.post('/api/plugin/:pluginId/review', authenticate, async (req, res) => {
     const result = await pluginService.addReview(req.user.userId, req.params.pluginId, req.body.rating, req.body.review);
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVIATHAN SYSTEM - Self-Evolving Growth Protocol
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const {
+  EvolverService,
+  SchedulerService,
+  EventBusService,
+  AttentionArbitrageService,
+  SyntheticSimulatorService,
+  FeedbackLedgerService,
+  PhilosophyRewriterService,
+  StealthBrowserService,
+  ProxyMeshService,
+  RateLimiterService,
+  AffiliateMeshService,
+  YieldHarvesterService,
+  ComputeTieringService
+} = require('./services');
+
+// Initialize Leviathan services
+const leviathanServices = {};
+
+try {
+  // Layer 1: Core SEGP
+  leviathanServices.evolver = new EvolverService(pool, memoryService, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.scheduler = new SchedulerService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.eventBus = EventBusService;
+
+  // Layer 2: Intelligence
+  leviathanServices.arbitrage = new AttentionArbitrageService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.simulator = new SyntheticSimulatorService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.ledger = new FeedbackLedgerService(pool, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.philosophy = new PhilosophyRewriterService(pool, memoryService, { geminiKey: process.env.GEMINI_API_KEY });
+
+  // Layer 3: Ghost Protocol
+  leviathanServices.stealthBrowser = new StealthBrowserService(pool);
+  leviathanServices.proxyMesh = new ProxyMeshService(pool);
+  leviathanServices.rateLimiter = new RateLimiterService(pool);
+
+  // Layer 4: Revenue Engine
+  leviathanServices.affiliate = new AffiliateMeshService(pool);
+  leviathanServices.yieldHarvester = new YieldHarvesterService(pool, null, { geminiKey: process.env.GEMINI_API_KEY });
+  leviathanServices.computeTiering = new ComputeTieringService(pool);
+
+  console.log('[Leviathan] All services initialized');
+
+  // Initialize async services
+  Promise.all([
+    leviathanServices.scheduler.initialize().catch(e => console.warn('[Leviathan] Scheduler init skipped:', e.message)),
+    leviathanServices.rateLimiter.initialize().catch(e => console.warn('[Leviathan] RateLimiter init skipped:', e.message)),
+    leviathanServices.proxyMesh.initialize().catch(e => console.warn('[Leviathan] ProxyMesh init skipped:', e.message))
+  ]).then(() => {
+    console.log('[Leviathan] Async services ready');
+  });
+
+} catch (error) {
+  console.error('[Leviathan] Service initialization error:', error.message);
+}
+
+// Mount Leviathan routes
+const { createLeviathanRoutes } = require('./routes/leviathan');
+const leviathanRouter = createLeviathanRoutes(leviathanServices, authenticate);
+app.use('/api/leviathan', leviathanRouter);
+
+console.log('[Leviathan] Routes mounted at /api/leviathan');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVIATHAN QUICK ACCESS ENDPOINTS (convenience shortcuts)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Simulate content before posting
+app.post('/api/simulate', authenticate, async (req, res) => {
+  try {
+    const { content, platform, audience } = req.body;
+    const result = await leviathanServices.simulator.simulate(req.user.userId, content, platform, { audience });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get attention arbitrage opportunities
+app.get('/api/arbitrage/opportunities', authenticate, async (req, res) => {
+  try {
+    const { niche } = req.query;
+    const gaps = await leviathanServices.arbitrage.discoverGaps(req.user.userId, niche);
+    res.json({ success: true, gaps });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Evolve content through self-critique
+app.post('/api/evolve', authenticate, async (req, res) => {
+  try {
+    const { agentId, output, context } = req.body;
+    const result = await leviathanServices.evolver.evolve(req.user.userId, agentId, output, context);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get compute usage and tier info
+app.get('/api/compute/usage', authenticate, async (req, res) => {
+  try {
+    const tier = await leviathanServices.computeTiering.getUserTier(req.user.userId);
+    const daily = await leviathanServices.computeTiering.getDailyUsage(req.user.userId);
+    const monthly = await leviathanServices.computeTiering.getMonthlyUsage(req.user.userId);
+    res.json({ success: true, tier, daily, monthly });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get philosophy summary
+app.get('/api/philosophy', authenticate, async (req, res) => {
+  try {
+    const summary = await leviathanServices.philosophy.getPhilosophySummary(req.user.userId);
+    res.json({ success: true, ...summary });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trigger philosophy evolution
+app.post('/api/philosophy/evolve', authenticate, async (req, res) => {
+  try {
+    const result = await leviathanServices.philosophy.evolve(req.user.userId, 'manual');
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Public referral redirect
+app.get('/r/:code', async (req, res) => {
+  try {
+    const link = await leviathanServices.affiliate.trackClick(req.params.code);
+    if (link && link.destination) {
+      res.redirect(link.destination);
+    } else {
+      res.redirect('/');
+    }
+  } catch (error) {
+    res.redirect('/');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADMIN COMMAND CENTER - Owner-Only Routes
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// In-memory service status (persisted to DB on change)
+const serviceStatus = {
+  auth: true,
+  oracle: true,
+  soul: true,
+  stripe: true,
+  scryer: true,
+  shadow: true,
+  sentinel: true,
+  dispatcher: true,
+  video: true,
+  neural_link: true,
+  dominion: true,
+  manifesto: true,
+  guardian: true,
+  compliance: true,
+  dno: true
+};
+
+// Admin middleware - checks for admin role
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Get all users (admin only)
+app.get('/api/admin/users', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, role, created_at FROM users ORDER BY created_at DESC LIMIT 100'
+    );
+    res.json({
+      success: true,
+      users: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update user role (admin only)
+app.put('/api/admin/users/:userId/role', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+    const validRoles = ['citizen', 'pro', 'agency', 'admin'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, userId]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all service statuses
+app.get('/api/admin/services', authenticate, requireAdmin, (req, res) => {
+  res.json({ success: true, services: serviceStatus });
+});
+
+// Set individual service status
+app.put('/api/admin/services/:serviceId', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { serviceId } = req.params;
+    const { enabled } = req.body;
+    if (serviceStatus.hasOwnProperty(serviceId)) {
+      serviceStatus[serviceId] = enabled;
+      console.log(`[Admin] Service ${serviceId} ${enabled ? 'ENABLED' : 'DISABLED'}`);
+      res.json({ success: true, service: serviceId, enabled });
+    } else {
+      res.status(404).json({ error: 'Service not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get system health metrics
+app.get('/api/admin/health', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const uptime = process.uptime();
+    const days = Math.floor(uptime / 86400);
+    const hours = Math.floor((uptime % 86400) / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+
+    res.json({
+      success: true,
+      cpu: Math.floor(Math.random() * 30) + 10, // Simulated
+      memory: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+      database: 45, // Would query connection pool stats
+      apiLatency: Math.floor(Math.random() * 50) + 20,
+      uptime: `${days}d ${hours}h ${mins}m`,
+      requestsPerMinute: Math.floor(Math.random() * 500) + 500,
+      activeConnections: Math.floor(Math.random() * 100) + 50,
+      errorRate: Math.random() * 0.02
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Emergency stop - disable all non-critical services
+app.post('/api/admin/emergency-stop', authenticate, requireAdmin, (req, res) => {
+  try {
+    const critical = ['auth', 'stripe']; // Keep auth and payments running
+    Object.keys(serviceStatus).forEach(key => {
+      if (!critical.includes(key)) {
+        serviceStatus[key] = false;
+      }
+    });
+    console.log('[Admin] EMERGENCY STOP - Non-critical services disabled');
+    res.json({ success: true, message: 'Emergency stop executed' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Enable all services
+app.post('/api/admin/enable-all', authenticate, requireAdmin, (req, res) => {
+  try {
+    Object.keys(serviceStatus).forEach(key => {
+      serviceStatus[key] = true;
+    });
+    console.log('[Admin] All services enabled');
+    res.json({ success: true, message: 'All services enabled' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Registration lock flag
+let registrationLocked = false;
+
+// Lock/unlock new registrations
+app.post('/api/admin/registration-lock', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { locked } = req.body;
+    registrationLocked = locked;
+    console.log(`[Admin] Registration ${locked ? 'LOCKED' : 'UNLOCKED'}`);
+    res.json({ success: true, locked: registrationLocked });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trigger database backup (placeholder)
+app.post('/api/admin/backup', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // In production, this would trigger a pg_dump or similar
+    console.log('[Admin] Database backup triggered');
+    res.json({
+      success: true,
+      message: 'Backup initiated',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEGAL COMPLIANCE AGENT - Insurance & Coverage Monitor
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Add insurance policy
+app.post('/api/compliance/policy', authenticate, async (req, res) => {
+  try {
+    const { policyType, provider, policyNumber, coverageLimit, deductible, premiumAnnual, effectiveDate, expirationDate, coverageDetails } = req.body;
+    const result = await pool.query(
+      `INSERT INTO insurance_policies (user_id, policy_type, provider, policy_number, coverage_limit, deductible, premium_annual, effective_date, expiration_date, coverage_details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [req.user.userId, policyType, provider, policyNumber, coverageLimit, deductible, premiumAnnual, effectiveDate, expirationDate, coverageDetails || {}]
+    );
+    res.json({ success: true, policy: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all policies
+app.get('/api/compliance/policies', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM insurance_policies WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, policies: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get coverage gaps
+app.get('/api/compliance/gaps', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM coverage_gaps WHERE user_id = $1 AND resolved = FALSE ORDER BY CASE severity WHEN \'critical\' THEN 1 WHEN \'high\' THEN 2 WHEN \'medium\' THEN 3 ELSE 4 END',
+      [req.user.userId]
+    );
+    res.json({ success: true, gaps: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get AI legal advice (uses Oracle agent)
+app.post('/api/compliance/advice', authenticate, async (req, res) => {
+  try {
+    const { query, category } = req.body;
+
+    const advice = await agents.oracle.synthesize({
+      prompt: `You are a legal compliance advisor for a digital creator business (IDEAVALIDATOR LLC). Provide concise, actionable guidance.
+
+Question: ${query}
+${category ? `Category: ${category}` : ''}
+
+Provide practical advice in 2-3 paragraphs. Include specific recommendations.
+IMPORTANT: End with "DISCLAIMER: This is general guidance, not legal advice. Consult a licensed attorney for specific legal matters."`,
+      model: 'gemini-2.0-flash'
+    });
+
+    await pool.query(
+      'INSERT INTO legal_advice_history (user_id, query, advice, category) VALUES ($1, $2, $3, $4)',
+      [req.user.userId, query, advice.response, category]
+    );
+
+    res.json({ success: true, advice: advice.response });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get advice history
+app.get('/api/compliance/advice/history', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT query, advice, created_at FROM legal_advice_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
+      [req.user.userId]
+    );
+    res.json({ success: true, history: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Register business activity
+app.post('/api/compliance/activity', authenticate, async (req, res) => {
+  try {
+    const { activityType, description, riskLevel } = req.body;
+    // Log activity and potentially trigger gap analysis
+    console.log(`[Compliance] Activity registered: ${activityType}`);
+    res.json({ success: true, registered: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Compliance dashboard
+app.get('/api/compliance/dashboard', authenticate, async (req, res) => {
+  try {
+    const [policies, gaps] = await Promise.all([
+      pool.query('SELECT * FROM insurance_policies WHERE user_id = $1', [req.user.userId]),
+      pool.query('SELECT * FROM coverage_gaps WHERE user_id = $1 AND resolved = FALSE', [req.user.userId])
+    ]);
+
+    const totalCoverage = policies.rows.reduce((sum, p) => sum + parseFloat(p.coverage_limit || 0), 0);
+    const criticalGaps = gaps.rows.filter(g => g.severity === 'critical').length;
+    const expiringSoon = policies.rows.filter(p => {
+      if (!p.expiration_date) return false;
+      const exp = new Date(p.expiration_date);
+      const now = new Date();
+      const days = (exp - now) / (1000 * 60 * 60 * 24);
+      return days <= 30 && days > 0;
+    });
+
+    let complianceScore = 100;
+    if (policies.rows.length === 0) complianceScore -= 40;
+    complianceScore -= (criticalGaps * 15);
+    complianceScore -= (gaps.rows.length * 5);
+    complianceScore = Math.max(0, Math.min(100, complianceScore));
+
+    const complianceStatus = complianceScore >= 80 ? 'COMPLIANT' : complianceScore >= 50 ? 'REVIEW_NEEDED' : 'ACTION_REQUIRED';
+
+    const alerts = [];
+    if (expiringSoon.length > 0) alerts.push({ type: 'expiring', severity: 'warning', message: `${expiringSoon.length} policy expiring within 30 days` });
+    if (criticalGaps > 0) alerts.push({ type: 'gap', severity: 'critical', message: `${criticalGaps} critical coverage gaps detected` });
+
+    res.json({
+      success: true,
+      dashboard: {
+        complianceScore,
+        complianceStatus,
+        policies: { total: policies.rows.length, active: policies.rows.filter(p => p.policy_status === 'active').length, expiringSoon, totalCoverage },
+        gaps: { total: gaps.rows.length, critical: criticalGaps, list: gaps.rows },
+        alerts
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GUARDIAN PROTOCOL - Self-Healing Infrastructure
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Health check
+app.get('/api/guardian/health', authenticate, async (req, res) => {
+  try {
+    const dbCheck = await pool.query('SELECT 1');
+    res.json({
+      success: true,
+      health: {
+        database: 'operational',
+        agents: Object.keys(agents).length,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Agent Zero - Report error
+app.post('/api/guardian/agent-zero/report', authenticate, async (req, res) => {
+  try {
+    const { errorType, errorMessage, stackTrace, context } = req.body;
+    const result = await pool.query(
+      `INSERT INTO error_logs (user_id, error_type, error_message, stack_trace, context)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, errorType, errorMessage, stackTrace, context || {}]
+    );
+    res.json({ success: true, logged: true, id: result.rows[0].id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Agent Zero - Get logs
+app.get('/api/guardian/agent-zero/logs', authenticate, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const result = await pool.query(
+      'SELECT * FROM error_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [req.user.userId, limit]
+    );
+    res.json({ success: true, logs: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sentinel - Report threat
+app.post('/api/guardian/sentinel/threat', authenticate, async (req, res) => {
+  try {
+    const { threatType, severity, source, details } = req.body;
+    const result = await pool.query(
+      `INSERT INTO security_threats (user_id, threat_type, severity, source, details)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, threatType, severity, source, details || {}]
+    );
+    res.json({ success: true, threat: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sentinel - Get threats
+app.get('/api/guardian/sentinel/threats', authenticate, async (req, res) => {
+  try {
+    const status = req.query.status;
+    let query = 'SELECT * FROM security_threats WHERE user_id = $1';
+    const params = [req.user.userId];
+    if (status) {
+      query += ' AND status = $2';
+      params.push(status);
+    }
+    query += ' ORDER BY created_at DESC';
+    const result = await pool.query(query, params);
+    res.json({ success: true, threats: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legal Oracle - Generate claim document
+app.post('/api/guardian/legal/generate', authenticate, async (req, res) => {
+  try {
+    const { claimType, context, urgency } = req.body;
+
+    const document = await agents.oracle.synthesize({
+      prompt: `Generate a professional legal claim document.
+Type: ${claimType}
+Context: ${JSON.stringify(context)}
+Urgency: ${urgency}
+
+Provide a formal document template with placeholders marked as [PLACEHOLDER].`,
+      model: 'gemini-2.0-flash'
+    });
+
+    res.json({ success: true, document: document.response, claimType, urgency });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legal Oracle - Status
+app.get('/api/guardian/legal/status', authenticate, async (req, res) => {
+  try {
+    res.json({ success: true, status: 'ready', capabilities: ['dmca', 'cease_desist', 'contract_dispute'] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Snapshot - Create backup
+app.post('/api/guardian/snapshot/create', authenticate, async (req, res) => {
+  try {
+    const { snapshotType, metadata } = req.body;
+
+    const [soul, policies, threats] = await Promise.all([
+      pool.query('SELECT * FROM digital_souls WHERE user_id = $1', [req.user.userId]),
+      pool.query('SELECT * FROM insurance_policies WHERE user_id = $1', [req.user.userId]),
+      pool.query('SELECT * FROM security_threats WHERE user_id = $1', [req.user.userId])
+    ]);
+
+    const snapshotData = {
+      soul: soul.rows[0] || null,
+      policies: policies.rows,
+      threats: threats.rows,
+      timestamp: new Date().toISOString()
+    };
+
+    const result = await pool.query(
+      `INSERT INTO soul_snapshots (user_id, snapshot_type, snapshot_data, metadata)
+       VALUES ($1, $2, $3, $4) RETURNING id, snapshot_type, created_at`,
+      [req.user.userId, snapshotType || 'full', snapshotData, metadata || {}]
+    );
+
+    res.json({ success: true, snapshot: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Snapshot - List
+app.get('/api/guardian/snapshot/list', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, snapshot_type, metadata, created_at FROM soul_snapshots WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, snapshots: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Snapshot - Restore
+app.post('/api/guardian/snapshot/restore/:snapshotId', authenticate, async (req, res) => {
+  try {
+    const { snapshotId } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM soul_snapshots WHERE id = $1 AND user_id = $2',
+      [snapshotId, req.user.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Snapshot not found' });
+
+    const snapshot = result.rows[0];
+    res.json({ success: true, restored: true, data: snapshot.snapshot_data });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Guardian Dashboard
+app.get('/api/guardian/dashboard', authenticate, async (req, res) => {
+  try {
+    const [errors, threats, snapshots] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM error_logs WHERE user_id = $1 AND resolved = FALSE', [req.user.userId]),
+      pool.query('SELECT COUNT(*) as count FROM security_threats WHERE user_id = $1 AND status = $2', [req.user.userId, 'active']),
+      pool.query('SELECT COUNT(*) as count FROM soul_snapshots WHERE user_id = $1', [req.user.userId])
+    ]);
+
+    res.json({
+      success: true,
+      dashboard: {
+        unresolvedErrors: parseInt(errors.rows[0].count),
+        activeThreats: parseInt(threats.rows[0].count),
+        totalSnapshots: parseInt(snapshots.rows[0].count),
+        systemStatus: 'operational'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEURAL DISPATCHER - Voice Alarms & Email Alerts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Send email alert
+app.post('/api/dispatcher/email', authenticate, async (req, res) => {
+  try {
+    const { to, subject, message, level } = req.body;
+
+    await pool.query(
+      `INSERT INTO alert_history (user_id, alert_type, level, message, channel, recipient, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [req.user.userId, 'email', level || 'info', message, 'email', to, 'sent']
+    );
+
+    // TODO: Integrate SendGrid/SES here
+    console.log(`[Dispatcher] Email queued to ${to}: ${subject}`);
+    res.json({ success: true, sent: true, simulated: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Configure channel
+app.post('/api/dispatcher/configure', authenticate, async (req, res) => {
+  try {
+    const { channel, enabled, config } = req.body;
+    await pool.query(
+      `INSERT INTO alert_channels (user_id, channel, enabled, config)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, channel) DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config`,
+      [req.user.userId, channel, enabled, config || {}]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get alert history
+app.get('/api/dispatcher/history', authenticate, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const channel = req.query.channel;
+    let query = 'SELECT * FROM alert_history WHERE user_id = $1';
+    const params = [req.user.userId];
+    if (channel) {
+      query += ' AND channel = $2';
+      params.push(channel);
+    }
+    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    params.push(limit);
+    const result = await pool.query(query, params);
+    res.json({ success: true, history: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get channels
+app.get('/api/dispatcher/channels', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM alert_channels WHERE user_id = $1',
+      [req.user.userId]
+    );
+    const channels = result.rows.length > 0 ? result.rows : [
+      { channel: 'voice', enabled: true, config: {} },
+      { channel: 'email', enabled: true, config: {} },
+      { channel: 'push', enabled: false, config: {} }
+    ];
+    res.json({ success: true, channels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trigger multi-channel alert
+app.post('/api/dispatcher/trigger', authenticate, async (req, res) => {
+  try {
+    const { message, level, channels } = req.body;
+    const results = [];
+    for (const channel of (channels || ['email'])) {
+      await pool.query(
+        `INSERT INTO alert_history (user_id, alert_type, level, message, channel, status)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [req.user.userId, 'trigger', level || 'warning', message, channel, 'sent']
+      );
+      results.push({ channel, status: 'sent' });
+    }
+    res.json({ success: true, dispatched: results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SHADOW ACTOR - Neural Persistence
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/shadow/activate', authenticate, async (req, res) => {
+  try {
+    const { actorType, autonomyLevel, delegationScope } = req.body;
+    const result = await pool.query(
+      `INSERT INTO shadow_actors (user_id, actor_type, autonomy_level, delegation_scope, status)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, actorType || 'contract_executor', autonomyLevel || 'supervised', delegationScope || {}, 'active']
+    );
+    res.json({ success: true, actor: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/shadow/execute', authenticate, async (req, res) => {
+  try {
+    const { actorId, action, contractId, signature } = req.body;
+    await pool.query(
+      'UPDATE shadow_actors SET last_action_at = NOW() WHERE id = $1 AND user_id = $2',
+      [actorId, req.user.userId]
+    );
+    console.log(`[Shadow] Actor ${actorId} executing: ${action}`);
+    res.json({ success: true, executed: true, action });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/shadow/status', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM shadow_actors WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, actors: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEGAL SENTINEL - Smart Contracts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/sentinel/create', authenticate, async (req, res) => {
+  try {
+    const { contractType, terms, parties, executionConditions, autoRenew } = req.body;
+    const result = await pool.query(
+      `INSERT INTO smart_contracts (user_id, contract_type, terms, parties, execution_conditions, auto_renew)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.user.userId, contractType, terms, parties, executionConditions || {}, autoRenew || false]
+    );
+    res.json({ success: true, contract: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/sentinel/execute/:contractId', authenticate, async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    await pool.query(
+      `UPDATE smart_contracts SET status = 'executed', executed_at = NOW() WHERE id = $1 AND user_id = $2`,
+      [contractId, req.user.userId]
+    );
+    res.json({ success: true, executed: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/sentinel/contracts', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM smart_contracts WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, contracts: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// D&O PROVISIONING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/dno/provision', authenticate, async (req, res) => {
+  try {
+    const { shieldType, coverageAmount } = req.body;
+    const result = await pool.query(
+      `INSERT INTO dno_shields (user_id, shield_type, coverage_amount, status, provisioned_at)
+       VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
+      [req.user.userId, shieldType || 'executive_standard', coverageAmount || 1000000, 'active']
+    );
+    res.json({ success: true, shield: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dno/status', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM dno_shields WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [req.user.userId]
+    );
+    res.json({ success: true, shield: result.rows[0] || null });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// YIELD HARVESTER - Silent Revenue Extraction
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/yield/configure', authenticate, async (req, res) => {
+  try {
+    const { sourceType, extractionRate, payoutThreshold } = req.body;
+    const result = await pool.query(
+      `INSERT INTO yield_streams (user_id, source_type, extraction_rate, payout_threshold)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.user.userId, sourceType || 'content_monetization', extractionRate || 0.0001, payoutThreshold || 100]
+    );
+    res.json({ success: true, stream: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/yield/extract', authenticate, async (req, res) => {
+  try {
+    const { streamId, amount } = req.body;
+    const result = await pool.query(
+      `INSERT INTO yield_extractions (stream_id, amount, status) VALUES ($1, $2, $3) RETURNING *`,
+      [streamId, amount || 0, 'completed']
+    );
+    await pool.query(
+      'UPDATE yield_streams SET total_extracted = total_extracted + $1 WHERE id = $2',
+      [amount || 0, streamId]
+    );
+    res.json({ success: true, extraction: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/yield/dashboard', authenticate, async (req, res) => {
+  try {
+    const streams = await pool.query(
+      'SELECT * FROM yield_streams WHERE user_id = $1',
+      [req.user.userId]
+    );
+    const totalExtracted = streams.rows.reduce((sum, s) => sum + parseFloat(s.total_extracted || 0), 0);
+    res.json({
+      success: true,
+      dashboard: {
+        streams: streams.rows,
+        totalExtracted,
+        activeStreams: streams.rows.filter(s => s.status === 'active').length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });

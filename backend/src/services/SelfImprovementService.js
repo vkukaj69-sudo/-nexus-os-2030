@@ -9,7 +9,7 @@ class SelfImprovementService {
   constructor(pool, config = {}) {
     this.pool = pool;
     this.genAI = new GoogleGenerativeAI(config.geminiKey || process.env.GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-3-flash' });
   }
 
   cleanJson(text) {

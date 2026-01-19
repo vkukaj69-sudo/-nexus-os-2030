@@ -25,7 +25,7 @@ class ReplyGuyAgent extends BaseAgent {
 
   getModel(apiKey) {
     const genAI = new GoogleGenerativeAI(apiKey || this.defaultApiKey);
-    return genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    return genAI.getGenerativeModel({ model: 'gemini-3-flash' });
   }
 
   async execute(task) {
