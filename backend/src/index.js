@@ -2688,6 +2688,158 @@ const postToTwitter = async (userId, content, mediaUrls = []) => {
   }
 };
 
+// Helper: Post to LinkedIn
+const postToLinkedIn = async (userId, content) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'linkedin']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) {
+      throw new Error('LinkedIn not connected');
+    }
+
+    const { access_token, platform_user_id } = platformConfig.rows[0];
+
+    // LinkedIn API - Create share
+    const response = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+        'X-Restli-Protocol-Version': '2.0.0'
+      },
+      body: JSON.stringify({
+        author: `urn:li:person:${platform_user_id}`,
+        lifecycleState: 'PUBLISHED',
+        specificContent: {
+          'com.linkedin.ugc.ShareContent': {
+            shareCommentary: { text: content },
+            shareMediaCategory: 'NONE'
+          }
+        },
+        visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'LinkedIn API error');
+    }
+
+    const data = await response.json();
+    const postId = data.id?.replace('urn:li:share:', '') || data.id;
+    return {
+      success: true,
+      platform_post_id: postId,
+      post_url: `https://www.linkedin.com/feed/update/${data.id}`
+    };
+  } catch (error) {
+    console.error('[Autonomy] LinkedIn post failed:', error.message);
+    throw error;
+  }
+};
+
+// Helper: Post to YouTube Community
+const postToYouTube = async (userId, content) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'youtube']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) {
+      throw new Error('YouTube not connected');
+    }
+
+    const { access_token } = platformConfig.rows[0];
+
+    // YouTube Community Post API
+    const response = await fetch('https://www.googleapis.com/youtube/v3/activities?part=snippet', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        snippet: {
+          description: content,
+          type: 'bulletin'
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'YouTube API error');
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      platform_post_id: data.id,
+      post_url: `https://www.youtube.com/post/${data.id}`
+    };
+  } catch (error) {
+    console.error('[Autonomy] YouTube post failed:', error.message);
+    throw error;
+  }
+};
+
+// Helper: Fetch Twitter engagement metrics
+const fetchTwitterEngagement = async (userId, postId) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'twitter']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) return null;
+
+    const { access_token } = platformConfig.rows[0];
+
+    const response = await fetch(
+      `https://api.twitter.com/2/tweets/${postId}?tweet.fields=public_metrics`,
+      {
+        headers: { 'Authorization': `Bearer ${access_token}` }
+      }
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const metrics = data.data?.public_metrics;
+
+    if (metrics) {
+      return {
+        likes: metrics.like_count || 0,
+        retweets: metrics.retweet_count || 0,
+        replies: metrics.reply_count || 0,
+        impressions: metrics.impression_count || 0
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('[Autonomy] Failed to fetch Twitter metrics:', error.message);
+    return null;
+  }
+};
+
+// Helper: Universal post dispatcher
+const postToplatform = async (userId, platform, content) => {
+  switch (platform) {
+    case 'twitter':
+      return postToTwitter(userId, content);
+    case 'linkedin':
+      return postToLinkedIn(userId, content);
+    case 'youtube':
+      return postToYouTube(userId, content);
+    default:
+      throw new Error(`Platform ${platform} not supported`);
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTONOMY API ROUTES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2907,13 +3059,8 @@ app.post('/api/autonomy/post', authenticate, async (req, res) => {
       contentToPost = queueItem?.content || content;
     }
 
-    // Post to platform
-    let postResult;
-    if (platform === 'twitter') {
-      postResult = await postToTwitter(req.user.userId, contentToPost);
-    } else {
-      throw new Error(`Platform ${platform} not supported yet`);
-    }
+    // Post to platform (supports twitter, linkedin, youtube)
+    const postResult = await postToplatform(req.user.userId, platform, contentToPost);
 
     // Record posted content
     const posted = await pool.query(
@@ -3101,19 +3248,18 @@ cron.schedule('*/15 * * * *', async () => {
 
     for (const item of approvedContent.rows) {
       try {
-        if (item.platform === 'twitter') {
-          const postResult = await postToTwitter(item.user_id, item.content);
+        // Universal dispatcher supports twitter, linkedin, youtube
+        const postResult = await postToplatform(item.user_id, item.platform, item.content);
 
-          await pool.query(
-            `INSERT INTO autonomy_posted_content (user_id, queue_id, platform, platform_post_id, content, post_url)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [item.user_id, item.id, 'twitter', postResult.platform_post_id, item.content, postResult.post_url]
-          );
+        await pool.query(
+          `INSERT INTO autonomy_posted_content (user_id, queue_id, platform, platform_post_id, content, post_url)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [item.user_id, item.id, item.platform, postResult.platform_post_id, item.content, postResult.post_url]
+        );
 
-          await pool.query(`UPDATE autonomy_content_queue SET status = 'posted' WHERE id = $1`, [item.id]);
+        await pool.query(`UPDATE autonomy_content_queue SET status = 'posted' WHERE id = $1`, [item.id]);
 
-          console.log(`[Autonomy] Posted approved content ${item.id}: ${postResult.post_url}`);
-        }
+        console.log(`[Autonomy] Posted approved content ${item.id} to ${item.platform}: ${postResult.post_url}`);
       } catch (postError) {
         await pool.query(
           `UPDATE autonomy_content_queue SET status = 'failed' WHERE id = $1`,
@@ -3127,4 +3273,72 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
-console.log('[Autonomy Engine] Scheduler initialized - running hourly content generation');
+// Fetch engagement metrics every 6 hours for learning
+cron.schedule('0 */6 * * *', async () => {
+  console.log('[Autonomy Scheduler] Fetching engagement metrics...');
+
+  try {
+    // Get posts from last 7 days that need metrics updated
+    const recentPosts = await pool.query(
+      `SELECT p.id, p.user_id, p.platform, p.platform_post_id
+       FROM autonomy_posted_content p
+       WHERE p.posted_at > NOW() - INTERVAL '7 days'
+       AND p.platform = 'twitter'
+       AND p.platform_post_id IS NOT NULL
+       LIMIT 100`
+    );
+
+    let updated = 0;
+    for (const post of recentPosts.rows) {
+      try {
+        const metrics = await fetchTwitterEngagement(post.user_id, post.platform_post_id);
+
+        if (metrics) {
+          // Calculate engagement rate (interactions / impressions)
+          const engagementRate = metrics.impressions > 0
+            ? ((metrics.likes + metrics.retweets + metrics.replies) / metrics.impressions)
+            : 0;
+
+          // Upsert engagement metrics
+          await pool.query(
+            `INSERT INTO autonomy_engagement (posted_id, likes, retweets, replies, impressions, engagement_rate, fetched_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             ON CONFLICT (posted_id) DO UPDATE SET
+               likes = $2, retweets = $3, replies = $4, impressions = $5,
+               engagement_rate = $6, fetched_at = NOW()`,
+            [post.id, metrics.likes, metrics.retweets, metrics.replies, metrics.impressions, engagementRate]
+          );
+          updated++;
+        }
+      } catch (fetchError) {
+        console.error(`[Autonomy] Failed to fetch metrics for post ${post.id}:`, fetchError.message);
+      }
+    }
+
+    console.log(`[Autonomy Scheduler] Updated engagement for ${updated}/${recentPosts.rows.length} posts`);
+
+    // Log best performing content for learning
+    const topPosts = await pool.query(
+      `SELECT p.content, p.platform, e.likes, e.retweets, e.engagement_rate
+       FROM autonomy_posted_content p
+       JOIN autonomy_engagement e ON e.posted_id = p.id
+       WHERE p.posted_at > NOW() - INTERVAL '7 days'
+       ORDER BY e.engagement_rate DESC
+       LIMIT 5`
+    );
+
+    if (topPosts.rows.length > 0) {
+      console.log('[Autonomy] Top performing content this week:');
+      topPosts.rows.forEach((post, i) => {
+        console.log(`  ${i + 1}. ${post.engagement_rate.toFixed(4)} rate | ${post.likes} likes | "${post.content.substring(0, 50)}..."`);
+      });
+    }
+  } catch (error) {
+    console.error('[Autonomy Scheduler] Engagement fetch error:', error.message);
+  }
+});
+
+// Add unique constraint for engagement upsert if not exists
+pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_engagement_posted ON autonomy_engagement(posted_id)`).catch(() => {});
+
+console.log('[Autonomy Engine] Scheduler initialized - hourly posting, 15min queue processing, 6hr engagement tracking');
