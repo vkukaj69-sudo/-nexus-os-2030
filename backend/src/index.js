@@ -13,6 +13,7 @@ const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 const { Queue, Worker } = require('bullmq');
 const IORedis = require('ioredis');
+const cron = require('node-cron');
 
 // Import Agent System
 const {
@@ -243,6 +244,116 @@ const runMigrations = async () => {
       )
     `);
     console.log('[Migration] yield_extractions table ready');
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // AUTONOMY ENGINE - Self-Promoting AI System
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    // Content Queue - Generated content waiting to be posted
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_content_queue (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        content_type VARCHAR(50) NOT NULL,
+        platform VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        media_urls JSONB DEFAULT '[]',
+        scheduled_for TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'pending',
+        generation_context JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_queue_status ON autonomy_content_queue(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_queue_scheduled ON autonomy_content_queue(scheduled_for)`);
+    console.log('[Migration] autonomy_content_queue table ready');
+
+    // Posted Content - Track what was posted
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_posted_content (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        queue_id INTEGER REFERENCES autonomy_content_queue(id) ON DELETE SET NULL,
+        platform VARCHAR(50) NOT NULL,
+        platform_post_id VARCHAR(200),
+        content TEXT NOT NULL,
+        media_urls JSONB DEFAULT '[]',
+        post_url VARCHAR(500),
+        posted_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_posted_platform ON autonomy_posted_content(platform)`);
+    console.log('[Migration] autonomy_posted_content table ready');
+
+    // Engagement Metrics - Track performance for learning
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_engagement (
+        id SERIAL PRIMARY KEY,
+        posted_id INTEGER REFERENCES autonomy_posted_content(id) ON DELETE CASCADE,
+        likes INTEGER DEFAULT 0,
+        retweets INTEGER DEFAULT 0,
+        replies INTEGER DEFAULT 0,
+        impressions INTEGER DEFAULT 0,
+        clicks INTEGER DEFAULT 0,
+        engagement_rate DECIMAL(5,4) DEFAULT 0,
+        fetched_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[Migration] autonomy_engagement table ready');
+
+    // Social Platform Credentials
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_platforms (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        access_token TEXT,
+        refresh_token TEXT,
+        token_expires_at TIMESTAMP,
+        platform_user_id VARCHAR(100),
+        platform_username VARCHAR(100),
+        enabled BOOLEAN DEFAULT TRUE,
+        config JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_platforms_unique ON autonomy_platforms(user_id, platform)`);
+    console.log('[Migration] autonomy_platforms table ready');
+
+    // Autonomy Config - System settings
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_config (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        enabled BOOLEAN DEFAULT FALSE,
+        posting_frequency VARCHAR(50) DEFAULT 'daily',
+        max_posts_per_day INTEGER DEFAULT 3,
+        content_types JSONB DEFAULT '["promotional", "educational", "engagement"]',
+        tone VARCHAR(50) DEFAULT 'professional',
+        topics JSONB DEFAULT '[]',
+        blacklist_words JSONB DEFAULT '[]',
+        require_approval BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id)
+      )
+    `);
+    console.log('[Migration] autonomy_config table ready');
+
+    // Autonomy Logs - Track all autonomous actions
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        action_type VARCHAR(100) NOT NULL,
+        details JSONB DEFAULT '{}',
+        status VARCHAR(50) DEFAULT 'success',
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_logs_user ON autonomy_logs(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_logs_created ON autonomy_logs(created_at)`);
+    console.log('[Migration] autonomy_logs table ready');
 
   } catch (err) {
     console.error('[Migration] Error:', err.message);
@@ -2504,3 +2615,516 @@ app.get('/api/yield/dashboard', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTONOMY ENGINE - Self-Promoting AI System
+// Zero-Human Intervention Content Generation & Posting
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Helper: Generate content using Oracle (Gemini)
+const generateAutonomousContent = async (userId, platform, contentType, context = {}) => {
+  try {
+    const oracle = registry.get('oracle_01');
+    if (!oracle) throw new Error('Oracle agent not available');
+
+    const prompts = {
+      promotional: `Generate a compelling ${platform} post promoting NEXUS OS - an autonomous AI operating system for creators. Focus on: autonomous agents, self-healing infrastructure, and AI-powered business automation. Keep it under 280 chars for Twitter. Be bold, futuristic, provocative. No hashtags unless essential. Context: ${JSON.stringify(context)}`,
+      educational: `Generate an educational ${platform} post about AI autonomy, digital sovereignty, or creator independence. Share a unique insight about how AI can run businesses autonomously. Under 280 chars for Twitter. Be thought-provoking. Context: ${JSON.stringify(context)}`,
+      engagement: `Generate a thought-provoking question for ${platform} about the future of AI, autonomous systems, or digital business. Under 280 chars. Make it spark conversation. Context: ${JSON.stringify(context)}`,
+      announcement: `Generate an announcement post for ${platform} about NEXUS OS updates or features. Be exciting but professional. Under 280 chars. Context: ${JSON.stringify(context)}`
+    };
+
+    const prompt = prompts[contentType] || prompts.promotional;
+    const result = await oracle.processTask({
+      type: 'synthesize',
+      payload: { prompt, model: 'gemini-2.0-flash' }
+    });
+
+    return result.response || result.text || result;
+  } catch (error) {
+    console.error('[Autonomy] Content generation failed:', error.message);
+    throw error;
+  }
+};
+
+// Helper: Post to Twitter/X
+const postToTwitter = async (userId, content, mediaUrls = []) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'twitter']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) {
+      throw new Error('Twitter not connected');
+    }
+
+    const { access_token, config } = platformConfig.rows[0];
+
+    // Twitter API v2 post
+    const response = await fetch('https://api.twitter.com/2/tweets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text: content })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Twitter API error');
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      platform_post_id: data.data?.id,
+      post_url: `https://twitter.com/i/status/${data.data?.id}`
+    };
+  } catch (error) {
+    console.error('[Autonomy] Twitter post failed:', error.message);
+    throw error;
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTONOMY API ROUTES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Get autonomy config
+app.get('/api/autonomy/config', authenticate, async (req, res) => {
+  try {
+    let config = await pool.query(
+      'SELECT * FROM autonomy_config WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    if (!config.rows[0]) {
+      // Create default config
+      config = await pool.query(
+        `INSERT INTO autonomy_config (user_id) VALUES ($1) RETURNING *`,
+        [req.user.userId]
+      );
+    }
+
+    res.json({ success: true, config: config.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update autonomy config
+app.put('/api/autonomy/config', authenticate, async (req, res) => {
+  try {
+    const { enabled, postingFrequency, maxPostsPerDay, contentTypes, tone, topics, blacklistWords, requireApproval } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO autonomy_config (user_id, enabled, posting_frequency, max_posts_per_day, content_types, tone, topics, blacklist_words, require_approval)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (user_id) DO UPDATE SET
+         enabled = COALESCE($2, autonomy_config.enabled),
+         posting_frequency = COALESCE($3, autonomy_config.posting_frequency),
+         max_posts_per_day = COALESCE($4, autonomy_config.max_posts_per_day),
+         content_types = COALESCE($5, autonomy_config.content_types),
+         tone = COALESCE($6, autonomy_config.tone),
+         topics = COALESCE($7, autonomy_config.topics),
+         blacklist_words = COALESCE($8, autonomy_config.blacklist_words),
+         require_approval = COALESCE($9, autonomy_config.require_approval)
+       RETURNING *`,
+      [req.user.userId, enabled, postingFrequency, maxPostsPerDay, JSON.stringify(contentTypes || []), tone, JSON.stringify(topics || []), JSON.stringify(blacklistWords || []), requireApproval]
+    );
+
+    res.json({ success: true, config: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Enable/Disable autonomy
+app.post('/api/autonomy/toggle', authenticate, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+
+    const result = await pool.query(
+      `UPDATE autonomy_config SET enabled = $1 WHERE user_id = $2 RETURNING *`,
+      [enabled, req.user.userId]
+    );
+
+    // Log the action
+    await pool.query(
+      `INSERT INTO autonomy_logs (user_id, action_type, details) VALUES ($1, $2, $3)`,
+      [req.user.userId, enabled ? 'autonomy_enabled' : 'autonomy_disabled', JSON.stringify({ timestamp: new Date() })]
+    );
+
+    res.json({ success: true, enabled, config: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Connect social platform
+app.post('/api/autonomy/platforms/connect', authenticate, async (req, res) => {
+  try {
+    const { platform, accessToken, refreshToken, platformUserId, platformUsername, config } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO autonomy_platforms (user_id, platform, access_token, refresh_token, platform_user_id, platform_username, config)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, platform) DO UPDATE SET
+         access_token = $3,
+         refresh_token = $4,
+         platform_user_id = $5,
+         platform_username = $6,
+         config = $7
+       RETURNING id, platform, platform_username, enabled, created_at`,
+      [req.user.userId, platform, accessToken, refreshToken, platformUserId, platformUsername, JSON.stringify(config || {})]
+    );
+
+    await pool.query(
+      `INSERT INTO autonomy_logs (user_id, action_type, details) VALUES ($1, $2, $3)`,
+      [req.user.userId, 'platform_connected', JSON.stringify({ platform, username: platformUsername })]
+    );
+
+    res.json({ success: true, platform: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get connected platforms
+app.get('/api/autonomy/platforms', authenticate, async (req, res) => {
+  try {
+    const platforms = await pool.query(
+      `SELECT id, platform, platform_username, enabled, created_at FROM autonomy_platforms WHERE user_id = $1`,
+      [req.user.userId]
+    );
+    res.json({ success: true, platforms: platforms.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Disconnect platform
+app.delete('/api/autonomy/platforms/:platform', authenticate, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [req.user.userId, req.params.platform]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate content (manual trigger or scheduled)
+app.post('/api/autonomy/generate', authenticate, async (req, res) => {
+  try {
+    const { platform = 'twitter', contentType = 'promotional', context = {} } = req.body;
+
+    const content = await generateAutonomousContent(req.user.userId, platform, contentType, context);
+
+    // Add to queue
+    const queued = await pool.query(
+      `INSERT INTO autonomy_content_queue (user_id, content_type, platform, content, generation_context, status)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.user.userId, contentType, platform, content, JSON.stringify(context), 'pending']
+    );
+
+    await pool.query(
+      `INSERT INTO autonomy_logs (user_id, action_type, details) VALUES ($1, $2, $3)`,
+      [req.user.userId, 'content_generated', JSON.stringify({ platform, contentType, queueId: queued.rows[0].id })]
+    );
+
+    res.json({ success: true, content, queued: queued.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get content queue
+app.get('/api/autonomy/queue', authenticate, async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = 'SELECT * FROM autonomy_content_queue WHERE user_id = $1';
+    const params = [req.user.userId];
+
+    if (status) {
+      query += ' AND status = $2';
+      params.push(status);
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT 50';
+
+    const queue = await pool.query(query, params);
+    res.json({ success: true, queue: queue.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Approve content for posting
+app.post('/api/autonomy/queue/:id/approve', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE autonomy_content_queue SET status = 'approved' WHERE id = $1 AND user_id = $2 RETURNING *`,
+      [req.params.id, req.user.userId]
+    );
+    res.json({ success: true, item: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reject/delete content
+app.delete('/api/autonomy/queue/:id', authenticate, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM autonomy_content_queue WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Post content immediately
+app.post('/api/autonomy/post', authenticate, async (req, res) => {
+  try {
+    const { queueId, content, platform = 'twitter' } = req.body;
+
+    let contentToPost = content;
+    let queueItem = null;
+
+    if (queueId) {
+      const queueResult = await pool.query(
+        'SELECT * FROM autonomy_content_queue WHERE id = $1 AND user_id = $2',
+        [queueId, req.user.userId]
+      );
+      queueItem = queueResult.rows[0];
+      contentToPost = queueItem?.content || content;
+    }
+
+    // Post to platform
+    let postResult;
+    if (platform === 'twitter') {
+      postResult = await postToTwitter(req.user.userId, contentToPost);
+    } else {
+      throw new Error(`Platform ${platform} not supported yet`);
+    }
+
+    // Record posted content
+    const posted = await pool.query(
+      `INSERT INTO autonomy_posted_content (user_id, queue_id, platform, platform_post_id, content, post_url)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.user.userId, queueId, platform, postResult.platform_post_id, contentToPost, postResult.post_url]
+    );
+
+    // Update queue status
+    if (queueId) {
+      await pool.query(
+        `UPDATE autonomy_content_queue SET status = 'posted' WHERE id = $1`,
+        [queueId]
+      );
+    }
+
+    await pool.query(
+      `INSERT INTO autonomy_logs (user_id, action_type, details) VALUES ($1, $2, $3)`,
+      [req.user.userId, 'content_posted', JSON.stringify({ platform, postId: posted.rows[0].id, postUrl: postResult.post_url })]
+    );
+
+    res.json({ success: true, posted: posted.rows[0], postResult });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get posted content history
+app.get('/api/autonomy/posted', authenticate, async (req, res) => {
+  try {
+    const posted = await pool.query(
+      `SELECT p.*, e.likes, e.retweets, e.replies, e.impressions, e.engagement_rate
+       FROM autonomy_posted_content p
+       LEFT JOIN autonomy_engagement e ON e.posted_id = p.id
+       WHERE p.user_id = $1
+       ORDER BY p.posted_at DESC LIMIT 50`,
+      [req.user.userId]
+    );
+    res.json({ success: true, posted: posted.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get autonomy logs
+app.get('/api/autonomy/logs', authenticate, async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+    const logs = await pool.query(
+      `SELECT * FROM autonomy_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [req.user.userId, parseInt(limit)]
+    );
+    res.json({ success: true, logs: logs.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get autonomy dashboard stats
+app.get('/api/autonomy/dashboard', authenticate, async (req, res) => {
+  try {
+    const config = await pool.query('SELECT * FROM autonomy_config WHERE user_id = $1', [req.user.userId]);
+    const platforms = await pool.query('SELECT platform, enabled FROM autonomy_platforms WHERE user_id = $1', [req.user.userId]);
+    const queueCount = await pool.query('SELECT COUNT(*) as count FROM autonomy_content_queue WHERE user_id = $1 AND status = $2', [req.user.userId, 'pending']);
+    const postedCount = await pool.query('SELECT COUNT(*) as count FROM autonomy_posted_content WHERE user_id = $1', [req.user.userId]);
+    const todayPosts = await pool.query(
+      `SELECT COUNT(*) as count FROM autonomy_posted_content WHERE user_id = $1 AND posted_at > NOW() - INTERVAL '24 hours'`,
+      [req.user.userId]
+    );
+    const recentLogs = await pool.query(
+      'SELECT * FROM autonomy_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10',
+      [req.user.userId]
+    );
+
+    res.json({
+      success: true,
+      dashboard: {
+        config: config.rows[0] || { enabled: false },
+        platforms: platforms.rows,
+        stats: {
+          queuedContent: parseInt(queueCount.rows[0].count),
+          totalPosted: parseInt(postedCount.rows[0].count),
+          postedToday: parseInt(todayPosts.rows[0].count)
+        },
+        recentActivity: recentLogs.rows
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTONOMY SCHEDULER - Cron Jobs for Autonomous Posting
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Run every hour - check for users with autonomy enabled and generate/post content
+cron.schedule('0 * * * *', async () => {
+  console.log('[Autonomy Scheduler] Running hourly check...');
+
+  try {
+    // Get all users with autonomy enabled
+    const enabledUsers = await pool.query(
+      `SELECT ac.*, u.id as user_id, u.email
+       FROM autonomy_config ac
+       JOIN users u ON u.id = ac.user_id
+       WHERE ac.enabled = true AND ac.require_approval = false`
+    );
+
+    for (const userConfig of enabledUsers.rows) {
+      try {
+        // Check if user has posted today
+        const todayPosts = await pool.query(
+          `SELECT COUNT(*) as count FROM autonomy_posted_content
+           WHERE user_id = $1 AND posted_at > NOW() - INTERVAL '24 hours'`,
+          [userConfig.user_id]
+        );
+
+        const postsToday = parseInt(todayPosts.rows[0].count);
+
+        if (postsToday < userConfig.max_posts_per_day) {
+          // Check connected platforms
+          const platforms = await pool.query(
+            'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND enabled = true',
+            [userConfig.user_id]
+          );
+
+          for (const platform of platforms.rows) {
+            // Generate content
+            const contentTypes = userConfig.content_types || ['promotional'];
+            const randomType = contentTypes[Math.floor(Math.random() * contentTypes.length)];
+
+            const content = await generateAutonomousContent(
+              userConfig.user_id,
+              platform.platform,
+              randomType,
+              { tone: userConfig.tone, topics: userConfig.topics }
+            );
+
+            // Post directly (no approval needed)
+            if (platform.platform === 'twitter') {
+              const postResult = await postToTwitter(userConfig.user_id, content);
+
+              await pool.query(
+                `INSERT INTO autonomy_posted_content (user_id, platform, platform_post_id, content, post_url)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [userConfig.user_id, 'twitter', postResult.platform_post_id, content, postResult.post_url]
+              );
+
+              await pool.query(
+                `INSERT INTO autonomy_logs (user_id, action_type, details) VALUES ($1, $2, $3)`,
+                [userConfig.user_id, 'auto_posted', JSON.stringify({ platform: 'twitter', postUrl: postResult.post_url })]
+              );
+
+              console.log(`[Autonomy] Auto-posted for user ${userConfig.user_id}: ${postResult.post_url}`);
+            }
+          }
+        }
+      } catch (userError) {
+        console.error(`[Autonomy] Error for user ${userConfig.user_id}:`, userError.message);
+        await pool.query(
+          `INSERT INTO autonomy_logs (user_id, action_type, status, error_message) VALUES ($1, $2, $3, $4)`,
+          [userConfig.user_id, 'auto_post_failed', 'error', userError.message]
+        );
+      }
+    }
+  } catch (error) {
+    console.error('[Autonomy Scheduler] Error:', error.message);
+  }
+});
+
+// Process approved content every 15 minutes
+cron.schedule('*/15 * * * *', async () => {
+  console.log('[Autonomy Scheduler] Processing approved content...');
+
+  try {
+    const approvedContent = await pool.query(
+      `SELECT q.*, ac.require_approval
+       FROM autonomy_content_queue q
+       JOIN autonomy_config ac ON ac.user_id = q.user_id
+       WHERE q.status = 'approved'
+       AND (q.scheduled_for IS NULL OR q.scheduled_for <= NOW())
+       LIMIT 10`
+    );
+
+    for (const item of approvedContent.rows) {
+      try {
+        if (item.platform === 'twitter') {
+          const postResult = await postToTwitter(item.user_id, item.content);
+
+          await pool.query(
+            `INSERT INTO autonomy_posted_content (user_id, queue_id, platform, platform_post_id, content, post_url)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [item.user_id, item.id, 'twitter', postResult.platform_post_id, item.content, postResult.post_url]
+          );
+
+          await pool.query(`UPDATE autonomy_content_queue SET status = 'posted' WHERE id = $1`, [item.id]);
+
+          console.log(`[Autonomy] Posted approved content ${item.id}: ${postResult.post_url}`);
+        }
+      } catch (postError) {
+        await pool.query(
+          `UPDATE autonomy_content_queue SET status = 'failed' WHERE id = $1`,
+          [item.id]
+        );
+        console.error(`[Autonomy] Failed to post ${item.id}:`, postError.message);
+      }
+    }
+  } catch (error) {
+    console.error('[Autonomy Scheduler] Process approved error:', error.message);
+  }
+});
+
+console.log('[Autonomy Engine] Scheduler initialized - running hourly content generation');
