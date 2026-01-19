@@ -355,11 +355,87 @@ const runMigrations = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_logs_created ON autonomy_logs(created_at)`);
     console.log('[Migration] autonomy_logs table ready');
 
+    // Autonomy Knowledge Base - PUBLIC marketing info only (no internal architecture)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS autonomy_knowledge (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        category VARCHAR(100) NOT NULL,
+        key VARCHAR(200) NOT NULL,
+        value TEXT NOT NULL,
+        priority INTEGER DEFAULT 5,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_knowledge_user ON autonomy_knowledge(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_autonomy_knowledge_category ON autonomy_knowledge(category)`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_knowledge_unique ON autonomy_knowledge(user_id, category, key)`);
+    console.log('[Migration] autonomy_knowledge table ready');
+
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   }
 };
 runMigrations();
+
+// Seed default public marketing knowledge for autonomy engine
+const seedDefaultKnowledge = async (userId) => {
+  const defaultKnowledge = [
+    // Product Identity - PUBLIC only
+    { category: 'product', key: 'name', value: 'NEXUS OS', priority: 10 },
+    { category: 'product', key: 'tagline', value: 'The AI Operating System for Autonomous Creators', priority: 10 },
+    { category: 'product', key: 'website', value: 'https://nexus-os.vercel.app', priority: 9 },
+    { category: 'product', key: 'description', value: 'NEXUS OS is a revolutionary platform that lets AI agents run your business autonomously - from research to content creation to self-promotion.', priority: 9 },
+
+    // Key Features - PUBLIC benefits only
+    { category: 'features', key: 'autonomous_agents', value: 'Specialized AI agents that work 24/7 without human intervention - researching, analyzing, creating, and executing tasks.', priority: 8 },
+    { category: 'features', key: 'self_promotion', value: 'AI-powered autonomous marketing that generates and posts content across all platforms without human input.', priority: 8 },
+    { category: 'features', key: 'multi_agent', value: 'Multiple specialized agents working in parallel - Oracle for knowledge, Sentinel for security, Vulcan for creation.', priority: 7 },
+    { category: 'features', key: 'real_time_intel', value: 'Live market research, trend analysis, and competitive intelligence fed directly to your AI workforce.', priority: 7 },
+    { category: 'features', key: 'voice_control', value: 'Control your entire AI empire with voice commands - speak your intentions, watch them execute.', priority: 6 },
+
+    // Value Propositions - PUBLIC
+    { category: 'value', key: 'time_freedom', value: 'Reclaim your time. Your AI agents work while you sleep, travel, or focus on what matters.', priority: 8 },
+    { category: 'value', key: 'scale_unlimited', value: 'Scale infinitely. One human + unlimited AI agents = unlimited output.', priority: 8 },
+    { category: 'value', key: 'zero_overhead', value: 'No employees, no contractors, no management. Just you and your AI workforce.', priority: 7 },
+    { category: 'value', key: 'creator_sovereignty', value: 'Own your AI. Own your data. Own your destiny. True digital sovereignty.', priority: 7 },
+
+    // Target Audience - PUBLIC
+    { category: 'audience', key: 'primary', value: 'Solo entrepreneurs, content creators, and indie hackers who want to build empires without teams.', priority: 6 },
+    { category: 'audience', key: 'secondary', value: 'Tech-forward businesses ready to embrace AI-first operations.', priority: 5 },
+    { category: 'audience', key: 'visionaries', value: 'People who see the future: AI as co-founder, not just tool.', priority: 5 },
+
+    // Brand Voice - PUBLIC
+    { category: 'voice', key: 'tone', value: 'Bold, futuristic, confident. We are building the future, not asking permission.', priority: 7 },
+    { category: 'voice', key: 'style', value: 'Direct, provocative, visionary. Challenge assumptions. Speak to builders.', priority: 7 },
+    { category: 'voice', key: 'avoid', value: 'Avoid: corporate jargon, apologetic language, buzzwords without substance, overpromising.', priority: 6 },
+
+    // CTAs - PUBLIC
+    { category: 'cta', key: 'primary', value: 'Join the autonomous revolution at nexus-os.vercel.app', priority: 6 },
+    { category: 'cta', key: 'soft', value: 'See what autonomous AI can do for your business.', priority: 5 },
+    { category: 'cta', key: 'question', value: 'Ready to let AI run your business?', priority: 5 },
+
+    // Differentiators - PUBLIC
+    { category: 'differentiator', key: 'vs_chatgpt', value: 'ChatGPT answers questions. NEXUS OS takes action. It doesn\'t wait for prompts - it works autonomously.', priority: 7 },
+    { category: 'differentiator', key: 'vs_zapier', value: 'Zapier automates tasks. NEXUS OS thinks, decides, and acts. It\'s not automation - it\'s autonomy.', priority: 7 },
+    { category: 'differentiator', key: 'unique', value: 'The only AI system designed to be your business partner, not just your assistant.', priority: 8 }
+  ];
+
+  try {
+    for (const item of defaultKnowledge) {
+      await pool.query(`
+        INSERT INTO autonomy_knowledge (user_id, category, key, value, priority)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id, category, key) DO NOTHING
+      `, [userId, item.category, item.key, item.value, item.priority]);
+    }
+    console.log(`[Autonomy] Seeded ${defaultKnowledge.length} knowledge entries for user ${userId}`);
+  } catch (err) {
+    console.error('[Autonomy] Knowledge seeding failed:', err.message);
+  }
+};
 
 // Redis
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
@@ -2621,17 +2697,123 @@ app.get('/api/yield/dashboard', authenticate, async (req, res) => {
 // Zero-Human Intervention Content Generation & Posting
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Helper: Generate content using Oracle (Gemini)
+// Helper: Fetch knowledge base for content generation
+const fetchKnowledgeContext = async (userId) => {
+  try {
+    // Check if user has knowledge entries, if not seed defaults
+    const countResult = await pool.query(
+      'SELECT COUNT(*) as count FROM autonomy_knowledge WHERE user_id = $1',
+      [userId]
+    );
+
+    if (parseInt(countResult.rows[0].count) === 0) {
+      await seedDefaultKnowledge(userId);
+    }
+
+    // Fetch all active knowledge entries ordered by priority
+    const knowledge = await pool.query(
+      `SELECT category, key, value FROM autonomy_knowledge
+       WHERE user_id = $1 AND active = TRUE
+       ORDER BY priority DESC, category, key`,
+      [userId]
+    );
+
+    // Build structured knowledge context
+    const grouped = {};
+    for (const row of knowledge.rows) {
+      if (!grouped[row.category]) grouped[row.category] = [];
+      grouped[row.category].push(`${row.key}: ${row.value}`);
+    }
+
+    let context = '=== PRODUCT KNOWLEDGE (use this to inform content) ===\n';
+    for (const [category, items] of Object.entries(grouped)) {
+      context += `\n[${category.toUpperCase()}]\n`;
+      context += items.join('\n');
+    }
+
+    return context;
+  } catch (err) {
+    console.error('[Autonomy] Knowledge fetch failed:', err.message);
+    return '';
+  }
+};
+
+// Helper: Generate content using Oracle (Gemini) with knowledge injection
 const generateAutonomousContent = async (userId, platform, contentType, context = {}) => {
   try {
     const oracle = registry.get('oracle_01');
     if (!oracle) throw new Error('Oracle agent not available');
 
+    // Fetch product knowledge from database
+    const knowledgeContext = await fetchKnowledgeContext(userId);
+
+    const charLimit = platform === 'twitter' ? '280' : platform === 'linkedin' ? '1300' : '500';
+
     const prompts = {
-      promotional: `Generate a compelling ${platform} post promoting NEXUS OS - an autonomous AI operating system for creators. Focus on: autonomous agents, self-healing infrastructure, and AI-powered business automation. Keep it under 280 chars for Twitter. Be bold, futuristic, provocative. No hashtags unless essential. Context: ${JSON.stringify(context)}`,
-      educational: `Generate an educational ${platform} post about AI autonomy, digital sovereignty, or creator independence. Share a unique insight about how AI can run businesses autonomously. Under 280 chars for Twitter. Be thought-provoking. Context: ${JSON.stringify(context)}`,
-      engagement: `Generate a thought-provoking question for ${platform} about the future of AI, autonomous systems, or digital business. Under 280 chars. Make it spark conversation. Context: ${JSON.stringify(context)}`,
-      announcement: `Generate an announcement post for ${platform} about NEXUS OS updates or features. Be exciting but professional. Under 280 chars. Context: ${JSON.stringify(context)}`
+      promotional: `You are the autonomous marketing AI for NEXUS OS. Generate a compelling ${platform} post that promotes the product.
+
+${knowledgeContext}
+
+RULES:
+- Max ${charLimit} characters
+- Be bold, futuristic, provocative
+- Reference specific features or benefits from the knowledge above
+- Match the brand voice guidelines
+- No hashtags unless essential
+- Don't mention "AI generated" or that you're an AI
+- Include CTA only if it fits naturally
+
+Additional context: ${JSON.stringify(context)}
+
+Generate ONLY the post content, nothing else:`,
+
+      educational: `You are the autonomous marketing AI for NEXUS OS. Generate an educational ${platform} post that teaches something valuable about AI autonomy, while subtly positioning the product.
+
+${knowledgeContext}
+
+RULES:
+- Max ${charLimit} characters
+- Share a unique insight about autonomous AI or digital business
+- Be thought-provoking and add real value
+- Can reference product features as examples
+- Match the brand voice: bold, visionary, no corporate jargon
+- No hashtags unless essential
+
+Additional context: ${JSON.stringify(context)}
+
+Generate ONLY the post content, nothing else:`,
+
+      engagement: `You are the autonomous marketing AI for NEXUS OS. Generate a thought-provoking question for ${platform} that sparks conversation about AI, autonomy, or the future of work.
+
+${knowledgeContext}
+
+RULES:
+- Max ${charLimit} characters
+- Ask a question that challenges assumptions
+- Make people want to respond
+- Align with brand voice: provocative, visionary
+- Don't directly sell - just spark discussion
+- No hashtags
+
+Additional context: ${JSON.stringify(context)}
+
+Generate ONLY the question, nothing else:`,
+
+      announcement: `You are the autonomous marketing AI for NEXUS OS. Generate an exciting announcement post for ${platform}.
+
+${knowledgeContext}
+
+RULES:
+- Max ${charLimit} characters
+- Be exciting but credible
+- Reference specific features from knowledge
+- Match brand voice: confident, futuristic
+- Include website CTA
+- No hashtags unless essential
+
+Additional context: ${JSON.stringify(context)}
+
+Generate ONLY the announcement, nothing else:`
     };
 
     const prompt = prompts[contentType] || prompts.promotional;
@@ -2640,7 +2822,13 @@ const generateAutonomousContent = async (userId, platform, contentType, context 
       payload: { prompt, model: 'gemini-2.0-flash' }
     });
 
-    return result.response || result.text || result;
+    // Clean up the response (remove quotes if wrapped)
+    let content = result.response || result.text || result;
+    if (typeof content === 'string') {
+      content = content.trim().replace(/^["']|["']$/g, '');
+    }
+
+    return content;
   } catch (error) {
     console.error('[Autonomy] Content generation failed:', error.message);
     throw error;
@@ -3148,6 +3336,173 @@ app.get('/api/autonomy/dashboard', authenticate, async (req, res) => {
         recentActivity: recentLogs.rows
       }
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTONOMY KNOWLEDGE BASE - Public Marketing Info Management
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Get all knowledge entries
+app.get('/api/autonomy/knowledge', authenticate, async (req, res) => {
+  try {
+    // Check if user has entries, seed defaults if not
+    const countResult = await pool.query(
+      'SELECT COUNT(*) as count FROM autonomy_knowledge WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    if (parseInt(countResult.rows[0].count) === 0) {
+      await seedDefaultKnowledge(req.user.userId);
+    }
+
+    const { category } = req.query;
+    let query = 'SELECT * FROM autonomy_knowledge WHERE user_id = $1';
+    const params = [req.user.userId];
+
+    if (category) {
+      query += ' AND category = $2';
+      params.push(category);
+    }
+
+    query += ' ORDER BY category, priority DESC, key';
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, knowledge: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get knowledge categories
+app.get('/api/autonomy/knowledge/categories', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT category, COUNT(*) as count
+       FROM autonomy_knowledge WHERE user_id = $1
+       GROUP BY category ORDER BY category`,
+      [req.user.userId]
+    );
+    res.json({ success: true, categories: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add new knowledge entry
+app.post('/api/autonomy/knowledge', authenticate, async (req, res) => {
+  try {
+    const { category, key, value, priority = 5 } = req.body;
+
+    if (!category || !key || !value) {
+      return res.status(400).json({ error: 'Category, key, and value are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO autonomy_knowledge (user_id, category, key, value, priority)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, category, key) DO UPDATE SET value = $4, priority = $5, updated_at = NOW()
+       RETURNING *`,
+      [req.user.userId, category, key, value, priority]
+    );
+
+    res.json({ success: true, entry: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update knowledge entry
+app.put('/api/autonomy/knowledge/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category, key, value, priority, active } = req.body;
+
+    const updates = [];
+    const params = [id, req.user.userId];
+    let paramIndex = 3;
+
+    if (category !== undefined) { updates.push(`category = $${paramIndex++}`); params.push(category); }
+    if (key !== undefined) { updates.push(`key = $${paramIndex++}`); params.push(key); }
+    if (value !== undefined) { updates.push(`value = $${paramIndex++}`); params.push(value); }
+    if (priority !== undefined) { updates.push(`priority = $${paramIndex++}`); params.push(priority); }
+    if (active !== undefined) { updates.push(`active = $${paramIndex++}`); params.push(active); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No updates provided' });
+    }
+
+    updates.push('updated_at = NOW()');
+
+    const result = await pool.query(
+      `UPDATE autonomy_knowledge SET ${updates.join(', ')} WHERE id = $1 AND user_id = $2 RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Knowledge entry not found' });
+    }
+
+    res.json({ success: true, entry: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete knowledge entry
+app.delete('/api/autonomy/knowledge/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM autonomy_knowledge WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset knowledge to defaults
+app.post('/api/autonomy/knowledge/reset', authenticate, async (req, res) => {
+  try {
+    // Delete all current entries
+    await pool.query('DELETE FROM autonomy_knowledge WHERE user_id = $1', [req.user.userId]);
+    // Re-seed defaults
+    await seedDefaultKnowledge(req.user.userId);
+    // Fetch the new entries
+    const result = await pool.query(
+      'SELECT * FROM autonomy_knowledge WHERE user_id = $1 ORDER BY category, priority DESC, key',
+      [req.user.userId]
+    );
+    res.json({ success: true, knowledge: result.rows, message: 'Knowledge reset to defaults' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk import knowledge entries
+app.post('/api/autonomy/knowledge/import', authenticate, async (req, res) => {
+  try {
+    const { entries } = req.body;
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'Entries array is required' });
+    }
+
+    let imported = 0;
+    for (const entry of entries) {
+      if (entry.category && entry.key && entry.value) {
+        await pool.query(
+          `INSERT INTO autonomy_knowledge (user_id, category, key, value, priority)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_id, category, key) DO UPDATE SET value = $4, priority = $5, updated_at = NOW()`,
+          [req.user.userId, entry.category, entry.key, entry.value, entry.priority || 5]
+        );
+        imported++;
+      }
+    }
+
+    res.json({ success: true, imported, message: `Imported ${imported} entries` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
