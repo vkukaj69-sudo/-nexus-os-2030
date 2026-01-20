@@ -4519,3 +4519,982 @@ cron.schedule('0 3 * * *', async () => {
 
 console.log('[Guardian] Self-healing protocol initialized - 5min health checks');
 console.log('[Evolver] Self-evolution system initialized - daily 3AM evolution cycles');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TREND SCANNER - Pattern Scavenging Engine
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const googleTrends = require('google-trends-api');
+
+// Database table for trends
+pool.query(`
+  CREATE TABLE IF NOT EXISTS trend_cache (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    keyword VARCHAR(200),
+    trend_data JSONB,
+    analysis TEXT,
+    counter_narrative TEXT,
+    relevance_score DECIMAL(5,2),
+    scraped_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Trends] trend_cache table ready')).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS trend_opportunities (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    trend_keyword VARCHAR(200),
+    opportunity_type VARCHAR(50),
+    suggested_content TEXT,
+    urgency VARCHAR(20) DEFAULT 'normal',
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Trends] trend_opportunities table ready')).catch(() => {});
+
+// Helper: Scan Google Trends for a keyword
+const scanTrends = async (keywords, geo = 'US') => {
+  const results = [];
+
+  for (const keyword of keywords) {
+    try {
+      const interestOverTime = await googleTrends.interestOverTime({
+        keyword,
+        geo,
+        startTime: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      });
+
+      const data = JSON.parse(interestOverTime);
+      const timelineData = data.default?.timelineData || [];
+
+      // Calculate trend velocity (is it rising or falling?)
+      const recentValues = timelineData.slice(-7).map(d => d.value[0]);
+      const avgRecent = recentValues.reduce((a, b) => a + b, 0) / recentValues.length;
+      const olderValues = timelineData.slice(0, 7).map(d => d.value[0]);
+      const avgOlder = olderValues.reduce((a, b) => a + b, 0) / olderValues.length;
+
+      const velocity = avgOlder > 0 ? ((avgRecent - avgOlder) / avgOlder) * 100 : 0;
+
+      results.push({
+        keyword,
+        currentInterest: recentValues[recentValues.length - 1] || 0,
+        velocity: velocity.toFixed(2),
+        trending: velocity > 20,
+        data: timelineData.slice(-14)
+      });
+    } catch (err) {
+      console.error(`[Trends] Failed to scan ${keyword}:`, err.message);
+    }
+  }
+
+  return results;
+};
+
+// Helper: Get related queries for deeper trend mining
+const getRelatedQueries = async (keyword, geo = 'US') => {
+  try {
+    const related = await googleTrends.relatedQueries({
+      keyword,
+      geo,
+      startTime: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    });
+
+    const data = JSON.parse(related);
+    return {
+      top: data.default?.rankedList?.[0]?.rankedKeyword?.slice(0, 10) || [],
+      rising: data.default?.rankedList?.[1]?.rankedKeyword?.slice(0, 10) || []
+    };
+  } catch (err) {
+    return { top: [], rising: [] };
+  }
+};
+
+// Helper: Analyze trends and generate counter-narrative with Oracle
+const analyzeTrendWithOracle = async (userId, trendData) => {
+  try {
+    const oracle = registry.get('oracle_01');
+    if (!oracle) return null;
+
+    // Get user's brand DNA for context
+    const soul = await pool.query(
+      'SELECT brand_dna FROM digital_souls WHERE user_id = $1',
+      [userId]
+    );
+    const brandContext = soul.rows[0]?.brand_dna || {};
+
+    const prompt = `You are a trend analyst for a brand. Analyze this trend data and suggest how to capitalize on it.
+
+BRAND CONTEXT:
+${JSON.stringify(brandContext, null, 2)}
+
+TREND DATA:
+Keyword: ${trendData.keyword}
+Current Interest: ${trendData.currentInterest}/100
+Velocity: ${trendData.velocity}% (${trendData.velocity > 20 ? 'RISING FAST' : trendData.velocity > 0 ? 'rising' : 'declining'})
+
+TASK:
+1. Explain why this trend matters (or doesn't) for the brand
+2. Suggest a "Counter-Narrative" - a unique angle that positions the brand as thought leader
+3. Draft 2 potential posts that ride this trend while staying on-brand
+4. Rate relevance 1-100
+
+Format as JSON:
+{
+  "relevance_score": 85,
+  "analysis": "Why this trend matters...",
+  "counter_narrative": "The unique angle to take...",
+  "suggested_posts": ["Post 1...", "Post 2..."],
+  "urgency": "high|normal|low"
+}`;
+
+    const result = await oracle.processTask({
+      type: 'synthesize',
+      payload: { prompt, model: 'gemini-2.0-flash' }
+    });
+
+    const responseText = result.response || result.text || result;
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return null;
+  } catch (err) {
+    console.error('[Trends] Oracle analysis failed:', err.message);
+    return null;
+  }
+};
+
+// API: Scan trends for user's niche
+app.post('/api/trends/scan', authenticate, async (req, res) => {
+  try {
+    const { keywords, geo = 'US' } = req.body;
+
+    if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
+      return res.status(400).json({ error: 'Keywords array required' });
+    }
+
+    // Scan trends
+    const trendResults = await scanTrends(keywords.slice(0, 5), geo);
+
+    // Analyze each with Oracle and store
+    const analyzed = [];
+    for (const trend of trendResults) {
+      const analysis = await analyzeTrendWithOracle(req.user.userId, trend);
+
+      if (analysis) {
+        // Cache the trend analysis
+        await pool.query(
+          `INSERT INTO trend_cache (user_id, keyword, trend_data, analysis, counter_narrative, relevance_score)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [req.user.userId, trend.keyword, JSON.stringify(trend), analysis.analysis, analysis.counter_narrative, analysis.relevance_score]
+        );
+
+        // Create opportunities for high-relevance trends
+        if (analysis.relevance_score >= 70) {
+          for (const post of analysis.suggested_posts || []) {
+            await pool.query(
+              `INSERT INTO trend_opportunities (user_id, trend_keyword, opportunity_type, suggested_content, urgency)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [req.user.userId, trend.keyword, 'trend_ride', post, analysis.urgency]
+            );
+          }
+        }
+
+        analyzed.push({ ...trend, analysis });
+      } else {
+        analyzed.push(trend);
+      }
+    }
+
+    res.json({ success: true, trends: analyzed });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get trend opportunities
+app.get('/api/trends/opportunities', authenticate, async (req, res) => {
+  try {
+    const opportunities = await pool.query(
+      `SELECT * FROM trend_opportunities
+       WHERE user_id = $1 AND status = 'pending'
+       ORDER BY urgency DESC, created_at DESC
+       LIMIT 20`,
+      [req.user.userId]
+    );
+
+    res.json({ success: true, opportunities: opportunities.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Use trend opportunity (queue the suggested content)
+app.post('/api/trends/opportunities/:id/use', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { platform = 'twitter' } = req.body;
+
+    const opp = await pool.query(
+      'SELECT * FROM trend_opportunities WHERE id = $1 AND user_id = $2',
+      [id, req.user.userId]
+    );
+
+    if (!opp.rows[0]) {
+      return res.status(404).json({ error: 'Opportunity not found' });
+    }
+
+    // Add to content queue
+    await pool.query(
+      `INSERT INTO autonomy_content_queue (user_id, platform, content, content_type, status)
+       VALUES ($1, $2, $3, 'trend_ride', 'pending')`,
+      [req.user.userId, platform, opp.rows[0].suggested_content]
+    );
+
+    // Mark opportunity as used
+    await pool.query(
+      'UPDATE trend_opportunities SET status = $1 WHERE id = $2',
+      ['used', id]
+    );
+
+    res.json({ success: true, message: 'Content queued from trend opportunity' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get cached trend analyses
+app.get('/api/trends/cache', authenticate, async (req, res) => {
+  try {
+    const cache = await pool.query(
+      `SELECT * FROM trend_cache
+       WHERE user_id = $1 AND scraped_at > NOW() - INTERVAL '24 hours'
+       ORDER BY relevance_score DESC`,
+      [req.user.userId]
+    );
+
+    res.json({ success: true, trends: cache.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get related rising queries for a topic
+app.get('/api/trends/related/:keyword', authenticate, async (req, res) => {
+  try {
+    const { keyword } = req.params;
+    const related = await getRelatedQueries(keyword);
+    res.json({ success: true, keyword, related });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trend scanning cron - runs every 6 hours
+cron.schedule('0 */6 * * *', async () => {
+  console.log('[Trends] Running scheduled trend scan...');
+
+  try {
+    // Get users with autonomy enabled and their topics
+    const users = await pool.query(
+      `SELECT ac.user_id, ac.topics, ds.brand_dna
+       FROM autonomy_config ac
+       LEFT JOIN digital_souls ds ON ds.user_id = ac.user_id
+       WHERE ac.enabled = true AND ac.topics IS NOT NULL`
+    );
+
+    for (const user of users.rows) {
+      const topics = user.topics || [];
+      if (topics.length === 0) continue;
+
+      const trends = await scanTrends(topics.slice(0, 3));
+
+      for (const trend of trends) {
+        if (trend.trending) {
+          const analysis = await analyzeTrendWithOracle(user.user_id, trend);
+
+          if (analysis && analysis.relevance_score >= 70) {
+            for (const post of analysis.suggested_posts || []) {
+              await pool.query(
+                `INSERT INTO trend_opportunities (user_id, trend_keyword, opportunity_type, suggested_content, urgency)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [user.user_id, trend.keyword, 'auto_trend', post, analysis.urgency]
+              );
+            }
+            console.log(`[Trends] Found opportunity for user ${user.user_id}: ${trend.keyword}`);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Trends] Scheduled scan error:', error.message);
+  }
+});
+
+console.log('[Trends] Pattern Scavenging Engine initialized - 6hr trend scans');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEURAL REPLIES - Reply Guy Mode (Attention Siphoning)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Database tables for reply mode
+pool.query(`
+  CREATE TABLE IF NOT EXISTS reply_targets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(50) DEFAULT 'twitter',
+    target_type VARCHAR(50),
+    target_handle VARCHAR(200),
+    target_keywords TEXT[],
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Neural Replies] reply_targets table ready')).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS reply_queue (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(50),
+    original_post_id VARCHAR(100),
+    original_post_url TEXT,
+    original_author VARCHAR(200),
+    original_content TEXT,
+    generated_reply TEXT,
+    status VARCHAR(50) DEFAULT 'pending',
+    replied_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Neural Replies] reply_queue table ready')).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS reply_history (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(50),
+    original_post_id VARCHAR(100),
+    reply_post_id VARCHAR(100),
+    original_author VARCHAR(200),
+    reply_content TEXT,
+    engagement JSONB DEFAULT '{}',
+    replied_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Neural Replies] reply_history table ready')).catch(() => {});
+
+// Helper: Search Twitter for relevant posts to reply to
+const searchTwitterForReplies = async (userId, query, maxResults = 10) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'twitter']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) return [];
+
+    const { access_token } = platformConfig.rows[0];
+
+    // Twitter API v2 search
+    const response = await fetch(
+      `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=${maxResults}&tweet.fields=author_id,created_at,public_metrics&expansions=author_id`,
+      {
+        headers: { 'Authorization': `Bearer ${access_token}` }
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Twitter search failed');
+    }
+
+    const data = await response.json();
+    const users = data.includes?.users || [];
+
+    return (data.data || []).map(tweet => {
+      const author = users.find(u => u.id === tweet.author_id);
+      return {
+        id: tweet.id,
+        text: tweet.text,
+        author_id: tweet.author_id,
+        author_username: author?.username || 'unknown',
+        author_name: author?.name || 'Unknown',
+        metrics: tweet.public_metrics,
+        created_at: tweet.created_at,
+        url: `https://twitter.com/${author?.username}/status/${tweet.id}`
+      };
+    });
+  } catch (error) {
+    console.error('[Neural Replies] Twitter search failed:', error.message);
+    return [];
+  }
+};
+
+// Helper: Generate strategic reply with Oracle
+const generateStrategicReply = async (userId, originalPost) => {
+  try {
+    const oracle = registry.get('oracle_01');
+    if (!oracle) return null;
+
+    // Get user's brand DNA
+    const soul = await pool.query(
+      'SELECT brand_dna FROM digital_souls WHERE user_id = $1',
+      [userId]
+    );
+    const brandDNA = soul.rows[0]?.brand_dna || {};
+
+    const prompt = `You are a strategic social media engagement expert. Generate a reply that:
+1. Adds genuine value to the conversation
+2. Subtly positions our brand as knowledgeable
+3. Encourages the author (and readers) to check out our work
+4. Is NOT spammy or self-promotional
+5. Matches the tone of the original post
+
+BRAND CONTEXT:
+Name: ${brandDNA.brand_name || 'Our brand'}
+Expertise: ${brandDNA.expertise || 'technology'}
+Voice: ${brandDNA.voice_traits?.join(', ') || 'professional, helpful'}
+
+ORIGINAL POST:
+Author: @${originalPost.author_username}
+Content: "${originalPost.text}"
+Engagement: ${originalPost.metrics?.like_count || 0} likes, ${originalPost.metrics?.reply_count || 0} replies
+
+Generate a reply (max 280 chars) that:
+- Acknowledges their point
+- Adds a valuable insight or perspective
+- Ends with subtle curiosity hook (no direct CTA)
+
+Reply only with the tweet text, nothing else.`;
+
+    const result = await oracle.processTask({
+      type: 'synthesize',
+      payload: { prompt, model: 'gemini-2.0-flash' }
+    });
+
+    let reply = result.response || result.text || result;
+    // Ensure under 280 chars
+    if (reply.length > 280) {
+      reply = reply.substring(0, 277) + '...';
+    }
+
+    return reply;
+  } catch (error) {
+    console.error('[Neural Replies] Reply generation failed:', error.message);
+    return null;
+  }
+};
+
+// Helper: Post reply to Twitter
+const postTwitterReply = async (userId, originalPostId, replyText) => {
+  try {
+    const platformConfig = await pool.query(
+      'SELECT * FROM autonomy_platforms WHERE user_id = $1 AND platform = $2',
+      [userId, 'twitter']
+    );
+
+    if (!platformConfig.rows[0]?.access_token) {
+      throw new Error('Twitter not connected');
+    }
+
+    const { access_token } = platformConfig.rows[0];
+
+    const response = await fetch('https://api.twitter.com/2/tweets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: replyText,
+        reply: { in_reply_to_tweet_id: originalPostId }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Reply failed');
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      reply_id: data.data?.id,
+      url: `https://twitter.com/i/status/${data.data?.id}`
+    };
+  } catch (error) {
+    console.error('[Neural Replies] Post reply failed:', error.message);
+    throw error;
+  }
+};
+
+// API: Add reply target (account or keyword to monitor)
+app.post('/api/replies/targets', authenticate, async (req, res) => {
+  try {
+    const { platform = 'twitter', target_type, target_handle, target_keywords } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO reply_targets (user_id, platform, target_type, target_handle, target_keywords)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, platform, target_type, target_handle, target_keywords]
+    );
+
+    res.json({ success: true, target: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get reply targets
+app.get('/api/replies/targets', authenticate, async (req, res) => {
+  try {
+    const targets = await pool.query(
+      'SELECT * FROM reply_targets WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, targets: targets.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Delete reply target
+app.delete('/api/replies/targets/:id', authenticate, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM reply_targets WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Scan for reply opportunities
+app.post('/api/replies/scan', authenticate, async (req, res) => {
+  try {
+    const { query, max_results = 10 } = req.body;
+
+    // Search Twitter
+    const posts = await searchTwitterForReplies(req.user.userId, query, max_results);
+
+    // Generate replies for each and queue them
+    const opportunities = [];
+    for (const post of posts) {
+      // Skip if already in queue
+      const existing = await pool.query(
+        'SELECT id FROM reply_queue WHERE user_id = $1 AND original_post_id = $2',
+        [req.user.userId, post.id]
+      );
+      if (existing.rows.length > 0) continue;
+
+      const reply = await generateStrategicReply(req.user.userId, post);
+
+      if (reply) {
+        const queued = await pool.query(
+          `INSERT INTO reply_queue (user_id, platform, original_post_id, original_post_url, original_author, original_content, generated_reply)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+          [req.user.userId, 'twitter', post.id, post.url, post.author_username, post.text, reply]
+        );
+
+        opportunities.push({
+          ...queued.rows[0],
+          original_metrics: post.metrics
+        });
+      }
+    }
+
+    res.json({ success: true, scanned: posts.length, queued: opportunities.length, opportunities });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get reply queue
+app.get('/api/replies/queue', authenticate, async (req, res) => {
+  try {
+    const queue = await pool.query(
+      `SELECT * FROM reply_queue
+       WHERE user_id = $1 AND status = 'pending'
+       ORDER BY created_at DESC`,
+      [req.user.userId]
+    );
+    res.json({ success: true, queue: queue.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Approve and send reply
+app.post('/api/replies/queue/:id/send', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const item = await pool.query(
+      'SELECT * FROM reply_queue WHERE id = $1 AND user_id = $2 AND status = $3',
+      [id, req.user.userId, 'pending']
+    );
+
+    if (!item.rows[0]) {
+      return res.status(404).json({ error: 'Reply not found or already sent' });
+    }
+
+    const reply = item.rows[0];
+
+    // Post the reply
+    const result = await postTwitterReply(req.user.userId, reply.original_post_id, reply.generated_reply);
+
+    // Update queue status
+    await pool.query(
+      'UPDATE reply_queue SET status = $1, replied_at = NOW() WHERE id = $2',
+      ['sent', id]
+    );
+
+    // Log to history
+    await pool.query(
+      `INSERT INTO reply_history (user_id, platform, original_post_id, reply_post_id, original_author, reply_content)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user.userId, 'twitter', reply.original_post_id, result.reply_id, reply.original_author, reply.generated_reply]
+    );
+
+    res.json({ success: true, result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Reject/skip reply
+app.delete('/api/replies/queue/:id', authenticate, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE reply_queue SET status = $1 WHERE id = $2 AND user_id = $3',
+      ['rejected', req.params.id, req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get reply history
+app.get('/api/replies/history', authenticate, async (req, res) => {
+  try {
+    const history = await pool.query(
+      `SELECT * FROM reply_history
+       WHERE user_id = $1
+       ORDER BY replied_at DESC
+       LIMIT 50`,
+      [req.user.userId]
+    );
+    res.json({ success: true, history: history.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Reply dashboard stats
+app.get('/api/replies/dashboard', authenticate, async (req, res) => {
+  try {
+    const totalReplies = await pool.query(
+      'SELECT COUNT(*) as count FROM reply_history WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    const repliesToday = await pool.query(
+      `SELECT COUNT(*) as count FROM reply_history
+       WHERE user_id = $1 AND replied_at > NOW() - INTERVAL '24 hours'`,
+      [req.user.userId]
+    );
+
+    const pendingQueue = await pool.query(
+      `SELECT COUNT(*) as count FROM reply_queue WHERE user_id = $1 AND status = 'pending'`,
+      [req.user.userId]
+    );
+
+    const targets = await pool.query(
+      'SELECT COUNT(*) as count FROM reply_targets WHERE user_id = $1 AND enabled = true',
+      [req.user.userId]
+    );
+
+    const recentReplies = await pool.query(
+      `SELECT * FROM reply_history
+       WHERE user_id = $1
+       ORDER BY replied_at DESC LIMIT 5`,
+      [req.user.userId]
+    );
+
+    res.json({
+      success: true,
+      dashboard: {
+        totalReplies: parseInt(totalReplies.rows[0].count),
+        repliesToday: parseInt(repliesToday.rows[0].count),
+        pendingQueue: parseInt(pendingQueue.rows[0].count),
+        activeTargets: parseInt(targets.rows[0].count),
+        recentReplies: recentReplies.rows
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+console.log('[Neural Replies] Reply Guy Mode initialized');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// YIELD DASHBOARD - Revenue Tracking & Self-Funding Infrastructure
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Database tables for yield tracking
+pool.query(`
+  CREATE TABLE IF NOT EXISTS revenue_streams (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    stream_type VARCHAR(100),
+    stream_name VARCHAR(200),
+    platform VARCHAR(100),
+    connection_data JSONB DEFAULT '{}',
+    status VARCHAR(50) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Yield] revenue_streams table ready')).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS revenue_events (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    stream_id INTEGER REFERENCES revenue_streams(id),
+    event_type VARCHAR(100),
+    amount DECIMAL(15,2),
+    currency VARCHAR(10) DEFAULT 'USD',
+    metadata JSONB DEFAULT '{}',
+    recorded_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Yield] revenue_events table ready')).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS compute_budget (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    total_earned DECIMAL(15,2) DEFAULT 0,
+    total_spent DECIMAL(15,2) DEFAULT 0,
+    current_balance DECIMAL(15,2) DEFAULT 0,
+    auto_reinvest BOOLEAN DEFAULT FALSE,
+    reinvest_percentage DECIMAL(5,2) DEFAULT 50,
+    updated_at TIMESTAMP DEFAULT NOW()
+  )
+`).then(() => console.log('[Yield] compute_budget table ready')).catch(() => {});
+
+// API: Add revenue stream
+app.post('/api/yield/streams', authenticate, async (req, res) => {
+  try {
+    const { stream_type, stream_name, platform, connection_data = {} } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO revenue_streams (user_id, stream_type, stream_name, platform, connection_data)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, stream_type, stream_name, platform, JSON.stringify(connection_data)]
+    );
+
+    res.json({ success: true, stream: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get revenue streams
+app.get('/api/yield/streams', authenticate, async (req, res) => {
+  try {
+    const streams = await pool.query(
+      'SELECT * FROM revenue_streams WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    res.json({ success: true, streams: streams.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Record revenue event
+app.post('/api/yield/events', authenticate, async (req, res) => {
+  try {
+    const { stream_id, event_type, amount, currency = 'USD', metadata = {} } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO revenue_events (user_id, stream_id, event_type, amount, currency, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.user.userId, stream_id, event_type, amount, currency, JSON.stringify(metadata)]
+    );
+
+    // Update compute budget
+    await pool.query(
+      `INSERT INTO compute_budget (user_id, total_earned, current_balance)
+       VALUES ($1, $2, $2)
+       ON CONFLICT (user_id) DO UPDATE SET
+         total_earned = compute_budget.total_earned + $2,
+         current_balance = compute_budget.current_balance + $2,
+         updated_at = NOW()`,
+      [req.user.userId, amount]
+    );
+
+    res.json({ success: true, event: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get revenue events
+app.get('/api/yield/events', authenticate, async (req, res) => {
+  try {
+    const { limit = 50, stream_id } = req.query;
+
+    let query = 'SELECT * FROM revenue_events WHERE user_id = $1';
+    const params = [req.user.userId];
+
+    if (stream_id) {
+      query += ' AND stream_id = $2';
+      params.push(stream_id);
+    }
+
+    query += ' ORDER BY recorded_at DESC LIMIT $' + (params.length + 1);
+    params.push(limit);
+
+    const events = await pool.query(query, params);
+    res.json({ success: true, events: events.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get/update compute budget
+app.get('/api/yield/budget', authenticate, async (req, res) => {
+  try {
+    let budget = await pool.query(
+      'SELECT * FROM compute_budget WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    if (!budget.rows[0]) {
+      budget = await pool.query(
+        'INSERT INTO compute_budget (user_id) VALUES ($1) RETURNING *',
+        [req.user.userId]
+      );
+    }
+
+    res.json({ success: true, budget: budget.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/yield/budget', authenticate, async (req, res) => {
+  try {
+    const { auto_reinvest, reinvest_percentage } = req.body;
+
+    const result = await pool.query(
+      `UPDATE compute_budget SET
+         auto_reinvest = COALESCE($2, auto_reinvest),
+         reinvest_percentage = COALESCE($3, reinvest_percentage),
+         updated_at = NOW()
+       WHERE user_id = $1 RETURNING *`,
+      [req.user.userId, auto_reinvest, reinvest_percentage]
+    );
+
+    res.json({ success: true, budget: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Spend from compute budget (for API costs)
+app.post('/api/yield/spend', authenticate, async (req, res) => {
+  try {
+    const { amount, reason, metadata = {} } = req.body;
+
+    const budget = await pool.query(
+      'SELECT * FROM compute_budget WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    if (!budget.rows[0] || parseFloat(budget.rows[0].current_balance) < amount) {
+      return res.status(400).json({ error: 'Insufficient compute budget' });
+    }
+
+    await pool.query(
+      `UPDATE compute_budget SET
+         total_spent = total_spent + $2,
+         current_balance = current_balance - $2,
+         updated_at = NOW()
+       WHERE user_id = $1`,
+      [req.user.userId, amount]
+    );
+
+    // Log the spend
+    await pool.query(
+      `INSERT INTO revenue_events (user_id, event_type, amount, metadata)
+       VALUES ($1, 'compute_spend', $2, $3)`,
+      [req.user.userId, -amount, JSON.stringify({ reason, ...metadata })]
+    );
+
+    res.json({ success: true, spent: amount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Yield dashboard
+app.get('/api/yield/dashboard', authenticate, async (req, res) => {
+  try {
+    const budget = await pool.query(
+      'SELECT * FROM compute_budget WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    const streams = await pool.query(
+      `SELECT rs.*,
+              COALESCE(SUM(re.amount), 0) as total_revenue,
+              COUNT(re.id) as event_count
+       FROM revenue_streams rs
+       LEFT JOIN revenue_events re ON re.stream_id = rs.id AND re.amount > 0
+       WHERE rs.user_id = $1
+       GROUP BY rs.id`,
+      [req.user.userId]
+    );
+
+    const recentEvents = await pool.query(
+      `SELECT re.*, rs.stream_name
+       FROM revenue_events re
+       LEFT JOIN revenue_streams rs ON rs.id = re.stream_id
+       WHERE re.user_id = $1
+       ORDER BY re.recorded_at DESC LIMIT 10`,
+      [req.user.userId]
+    );
+
+    // Calculate totals
+    const totals = await pool.query(
+      `SELECT
+         SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_earned,
+         SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_spent,
+         SUM(CASE WHEN recorded_at > NOW() - INTERVAL '30 days' AND amount > 0 THEN amount ELSE 0 END) as earned_30d,
+         SUM(CASE WHEN recorded_at > NOW() - INTERVAL '30 days' AND amount < 0 THEN ABS(amount) ELSE 0 END) as spent_30d
+       FROM revenue_events WHERE user_id = $1`,
+      [req.user.userId]
+    );
+
+    res.json({
+      success: true,
+      dashboard: {
+        budget: budget.rows[0] || { total_earned: 0, total_spent: 0, current_balance: 0 },
+        streams: streams.rows,
+        recentEvents: recentEvents.rows,
+        totals: totals.rows[0]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add unique constraint for compute_budget
+pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_compute_budget_user ON compute_budget(user_id)`).catch(() => {});
+
+console.log('[Yield] Revenue tracking system initialized');
