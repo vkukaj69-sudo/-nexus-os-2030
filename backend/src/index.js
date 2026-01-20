@@ -485,6 +485,155 @@ const runMigrations = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_health_metrics_type ON system_health_metrics(metric_type)`);
     console.log('[Migration] system_health_metrics table ready');
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // RATE LIMIT MANAGER - Track API usage and prevent bans
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    // API Rate Limits - Track limits per platform/endpoint
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS api_rate_limits (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        endpoint VARCHAR(200) DEFAULT '*',
+        requests_limit INTEGER DEFAULT 100,
+        requests_window_minutes INTEGER DEFAULT 15,
+        daily_limit INTEGER DEFAULT 1000,
+        monthly_limit INTEGER DEFAULT 50000,
+        current_window_count INTEGER DEFAULT 0,
+        current_daily_count INTEGER DEFAULT 0,
+        current_monthly_count INTEGER DEFAULT 0,
+        window_reset_at TIMESTAMP DEFAULT NOW(),
+        daily_reset_at TIMESTAMP DEFAULT NOW() + INTERVAL '1 day',
+        monthly_reset_at TIMESTAMP DEFAULT NOW() + INTERVAL '1 month',
+        paused_until TIMESTAMP,
+        pause_reason VARCHAR(200),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_limits_unique ON api_rate_limits(user_id, platform, endpoint)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_limits_platform ON api_rate_limits(platform)`);
+    console.log('[Migration] api_rate_limits table ready');
+
+    // Rate Limit Events - Log all API calls for analysis
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rate_limit_events (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        endpoint VARCHAR(200),
+        request_type VARCHAR(50),
+        response_code INTEGER,
+        rate_limit_remaining INTEGER,
+        rate_limit_reset TIMESTAMP,
+        latency_ms INTEGER,
+        success BOOLEAN DEFAULT TRUE,
+        error_message TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_events_user ON rate_limit_events(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_events_platform ON rate_limit_events(platform)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_events_created ON rate_limit_events(created_at)`);
+    console.log('[Migration] rate_limit_events table ready');
+
+    // Request Queue - Buffer requests when near limits
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS request_queue (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        endpoint VARCHAR(200),
+        request_type VARCHAR(50),
+        request_payload JSONB NOT NULL,
+        priority INTEGER DEFAULT 5,
+        scheduled_for TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'queued',
+        attempts INTEGER DEFAULT 0,
+        max_attempts INTEGER DEFAULT 3,
+        result JSONB,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        processed_at TIMESTAMP
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_request_queue_status ON request_queue(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_request_queue_scheduled ON request_queue(scheduled_for)`);
+    console.log('[Migration] request_queue table ready');
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // ACCOUNT HEALTH MONITOR - Track account health and warn before suspension
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    // Account Health Status - Overall health per platform
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS account_health (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        health_score INTEGER DEFAULT 100,
+        status VARCHAR(50) DEFAULT 'healthy',
+        warning_flags JSONB DEFAULT '[]',
+        error_rate_1h DECIMAL(5,2) DEFAULT 0,
+        error_rate_24h DECIMAL(5,2) DEFAULT 0,
+        rate_limit_hits_24h INTEGER DEFAULT 0,
+        auth_failures_24h INTEGER DEFAULT 0,
+        consecutive_errors INTEGER DEFAULT 0,
+        last_successful_call TIMESTAMP,
+        last_error TIMESTAMP,
+        last_error_message TEXT,
+        suspended_until TIMESTAMP,
+        suspension_reason TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_account_health_unique ON account_health(user_id, platform)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_health_status ON account_health(status)`);
+    console.log('[Migration] account_health table ready');
+
+    // Health Events - Track significant health-related events
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_events (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        event_type VARCHAR(100) NOT NULL,
+        severity VARCHAR(20) DEFAULT 'info',
+        message TEXT,
+        details JSONB DEFAULT '{}',
+        acknowledged BOOLEAN DEFAULT FALSE,
+        acknowledged_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_health_events_user ON health_events(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_health_events_platform ON health_events(platform)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_health_events_severity ON health_events(severity)`);
+    console.log('[Migration] health_events table ready');
+
+    // Health Alerts Config - Alert thresholds per platform
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_alert_config (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        platform VARCHAR(50) NOT NULL,
+        error_rate_warning DECIMAL(5,2) DEFAULT 10,
+        error_rate_critical DECIMAL(5,2) DEFAULT 25,
+        rate_limit_warning_threshold INTEGER DEFAULT 80,
+        consecutive_error_warning INTEGER DEFAULT 3,
+        consecutive_error_critical INTEGER DEFAULT 5,
+        auto_pause_on_critical BOOLEAN DEFAULT TRUE,
+        notify_on_warning BOOLEAN DEFAULT TRUE,
+        notify_on_critical BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_health_config_unique ON health_alert_config(user_id, platform)`);
+    console.log('[Migration] health_alert_config table ready');
+
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   }
@@ -5498,3 +5647,764 @@ app.get('/api/yield/dashboard', authenticate, async (req, res) => {
 pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_compute_budget_user ON compute_budget(user_id)`).catch(() => {});
 
 console.log('[Yield] Revenue tracking system initialized');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RATE LIMIT MANAGER - Track API usage and prevent bans
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Platform default limits (based on public API documentation)
+const PLATFORM_DEFAULTS = {
+  twitter: {
+    requests_limit: 15,           // per window
+    requests_window_minutes: 15,
+    daily_limit: 500,
+    monthly_limit: 10000
+  },
+  linkedin: {
+    requests_limit: 100,
+    requests_window_minutes: 1440, // daily
+    daily_limit: 100,
+    monthly_limit: 3000
+  },
+  youtube: {
+    requests_limit: 10000,
+    requests_window_minutes: 1440,
+    daily_limit: 10000,
+    monthly_limit: 300000
+  },
+  gemini: {
+    requests_limit: 60,
+    requests_window_minutes: 1,
+    daily_limit: 1500,
+    monthly_limit: 45000
+  },
+  openai: {
+    requests_limit: 60,
+    requests_window_minutes: 1,
+    daily_limit: 10000,
+    monthly_limit: 300000
+  }
+};
+
+// Helper: Get or create rate limit tracker for platform
+const getOrCreateRateLimit = async (userId, platform, endpoint = '*') => {
+  let result = await pool.query(
+    'SELECT * FROM api_rate_limits WHERE user_id = $1 AND platform = $2 AND endpoint = $3',
+    [userId, platform, endpoint]
+  );
+
+  if (result.rows.length === 0) {
+    const defaults = PLATFORM_DEFAULTS[platform] || {
+      requests_limit: 100,
+      requests_window_minutes: 15,
+      daily_limit: 1000,
+      monthly_limit: 50000
+    };
+
+    result = await pool.query(
+      `INSERT INTO api_rate_limits (user_id, platform, endpoint, requests_limit, requests_window_minutes, daily_limit, monthly_limit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, platform, endpoint) DO UPDATE SET updated_at = NOW()
+       RETURNING *`,
+      [userId, platform, endpoint, defaults.requests_limit, defaults.requests_window_minutes, defaults.daily_limit, defaults.monthly_limit]
+    );
+  }
+
+  return result.rows[0];
+};
+
+// Helper: Check if request is allowed (returns { allowed, reason, waitMs })
+const checkRateLimit = async (userId, platform, endpoint = '*') => {
+  const limit = await getOrCreateRateLimit(userId, platform, endpoint);
+  const now = new Date();
+
+  // Reset counters if windows have passed
+  if (new Date(limit.window_reset_at) <= now) {
+    await pool.query(
+      `UPDATE api_rate_limits SET
+         current_window_count = 0,
+         window_reset_at = NOW() + ($2 * INTERVAL '1 minute')
+       WHERE id = $1`,
+      [limit.id, limit.requests_window_minutes]
+    );
+    limit.current_window_count = 0;
+  }
+
+  if (new Date(limit.daily_reset_at) <= now) {
+    await pool.query(
+      `UPDATE api_rate_limits SET
+         current_daily_count = 0,
+         daily_reset_at = NOW() + INTERVAL '1 day'
+       WHERE id = $1`,
+      [limit.id]
+    );
+    limit.current_daily_count = 0;
+  }
+
+  if (new Date(limit.monthly_reset_at) <= now) {
+    await pool.query(
+      `UPDATE api_rate_limits SET
+         current_monthly_count = 0,
+         monthly_reset_at = NOW() + INTERVAL '1 month'
+       WHERE id = $1`,
+      [limit.id]
+    );
+    limit.current_monthly_count = 0;
+  }
+
+  // Check if paused
+  if (limit.paused_until && new Date(limit.paused_until) > now) {
+    return {
+      allowed: false,
+      reason: limit.pause_reason || 'Rate limit pause active',
+      waitMs: new Date(limit.paused_until) - now,
+      pausedUntil: limit.paused_until
+    };
+  }
+
+  // Check window limit
+  if (limit.current_window_count >= limit.requests_limit) {
+    const waitMs = new Date(limit.window_reset_at) - now;
+    return {
+      allowed: false,
+      reason: `Window limit reached (${limit.current_window_count}/${limit.requests_limit})`,
+      waitMs: Math.max(0, waitMs),
+      resetAt: limit.window_reset_at
+    };
+  }
+
+  // Check daily limit
+  if (limit.current_daily_count >= limit.daily_limit) {
+    const waitMs = new Date(limit.daily_reset_at) - now;
+    return {
+      allowed: false,
+      reason: `Daily limit reached (${limit.current_daily_count}/${limit.daily_limit})`,
+      waitMs: Math.max(0, waitMs),
+      resetAt: limit.daily_reset_at
+    };
+  }
+
+  // Check monthly limit
+  if (limit.current_monthly_count >= limit.monthly_limit) {
+    const waitMs = new Date(limit.monthly_reset_at) - now;
+    return {
+      allowed: false,
+      reason: `Monthly limit reached (${limit.current_monthly_count}/${limit.monthly_limit})`,
+      waitMs: Math.max(0, waitMs),
+      resetAt: limit.monthly_reset_at
+    };
+  }
+
+  // Calculate usage percentages for warnings
+  const windowPct = (limit.current_window_count / limit.requests_limit) * 100;
+  const dailyPct = (limit.current_daily_count / limit.daily_limit) * 100;
+
+  return {
+    allowed: true,
+    usage: {
+      window: { current: limit.current_window_count, limit: limit.requests_limit, percentage: windowPct },
+      daily: { current: limit.current_daily_count, limit: limit.daily_limit, percentage: dailyPct },
+      monthly: { current: limit.current_monthly_count, limit: limit.monthly_limit }
+    },
+    warning: windowPct >= 80 || dailyPct >= 80 ? 'Approaching rate limit' : null
+  };
+};
+
+// Helper: Record API call and update counters
+const recordApiCall = async (userId, platform, endpoint, success, metadata = {}) => {
+  // Update counters
+  await pool.query(
+    `UPDATE api_rate_limits SET
+       current_window_count = current_window_count + 1,
+       current_daily_count = current_daily_count + 1,
+       current_monthly_count = current_monthly_count + 1,
+       updated_at = NOW()
+     WHERE user_id = $1 AND platform = $2 AND endpoint = $3`,
+    [userId, platform, endpoint]
+  );
+
+  // Log the event
+  await pool.query(
+    `INSERT INTO rate_limit_events (user_id, platform, endpoint, request_type, response_code, rate_limit_remaining, latency_ms, success, error_message, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      userId,
+      platform,
+      endpoint,
+      metadata.requestType || 'unknown',
+      metadata.responseCode || (success ? 200 : 500),
+      metadata.rateLimitRemaining,
+      metadata.latencyMs,
+      success,
+      metadata.errorMessage,
+      JSON.stringify(metadata)
+    ]
+  );
+
+  // Update account health
+  await updateAccountHealth(userId, platform, success, metadata);
+};
+
+// Helper: Pause platform API calls
+const pausePlatform = async (userId, platform, durationMinutes, reason) => {
+  const pauseUntil = new Date(Date.now() + durationMinutes * 60 * 1000);
+
+  await pool.query(
+    `UPDATE api_rate_limits SET
+       paused_until = $3,
+       pause_reason = $4,
+       updated_at = NOW()
+     WHERE user_id = $1 AND platform = $2`,
+    [userId, platform, pauseUntil, reason]
+  );
+
+  // Log health event
+  await pool.query(
+    `INSERT INTO health_events (user_id, platform, event_type, severity, message, details)
+     VALUES ($1, $2, 'auto_pause', 'warning', $3, $4)`,
+    [userId, platform, reason, JSON.stringify({ paused_until: pauseUntil, duration_minutes: durationMinutes })]
+  );
+
+  return pauseUntil;
+};
+
+// API: Get rate limit status for all platforms
+app.get('/api/ratelimits/status', authenticate, async (req, res) => {
+  try {
+    const limits = await pool.query(
+      `SELECT * FROM api_rate_limits WHERE user_id = $1 ORDER BY platform`,
+      [req.user.userId]
+    );
+
+    // Add usage percentages
+    const withUsage = limits.rows.map(l => ({
+      ...l,
+      window_usage_pct: (l.current_window_count / l.requests_limit * 100).toFixed(1),
+      daily_usage_pct: (l.current_daily_count / l.daily_limit * 100).toFixed(1),
+      monthly_usage_pct: (l.current_monthly_count / l.monthly_limit * 100).toFixed(1),
+      is_paused: l.paused_until && new Date(l.paused_until) > new Date()
+    }));
+
+    res.json({ success: true, limits: withUsage });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Check if specific request is allowed
+app.post('/api/ratelimits/check', authenticate, async (req, res) => {
+  try {
+    const { platform, endpoint = '*' } = req.body;
+
+    if (!platform) {
+      return res.status(400).json({ error: 'Platform is required' });
+    }
+
+    const result = await checkRateLimit(req.user.userId, platform, endpoint);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Record an API call (for manual tracking)
+app.post('/api/ratelimits/record', authenticate, async (req, res) => {
+  try {
+    const { platform, endpoint = '*', success = true, metadata = {} } = req.body;
+
+    if (!platform) {
+      return res.status(400).json({ error: 'Platform is required' });
+    }
+
+    await recordApiCall(req.user.userId, platform, endpoint, success, metadata);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Update rate limits for a platform
+app.put('/api/ratelimits/:platform', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+    const { requests_limit, requests_window_minutes, daily_limit, monthly_limit } = req.body;
+
+    await getOrCreateRateLimit(req.user.userId, platform); // Ensure exists
+
+    const result = await pool.query(
+      `UPDATE api_rate_limits SET
+         requests_limit = COALESCE($3, requests_limit),
+         requests_window_minutes = COALESCE($4, requests_window_minutes),
+         daily_limit = COALESCE($5, daily_limit),
+         monthly_limit = COALESCE($6, monthly_limit),
+         updated_at = NOW()
+       WHERE user_id = $1 AND platform = $2
+       RETURNING *`,
+      [req.user.userId, platform, requests_limit, requests_window_minutes, daily_limit, monthly_limit]
+    );
+
+    res.json({ success: true, limit: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Pause a platform
+app.post('/api/ratelimits/:platform/pause', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+    const { duration_minutes = 60, reason = 'Manual pause' } = req.body;
+
+    const pauseUntil = await pausePlatform(req.user.userId, platform, duration_minutes, reason);
+    res.json({ success: true, paused_until: pauseUntil });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Unpause a platform
+app.post('/api/ratelimits/:platform/unpause', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+
+    await pool.query(
+      `UPDATE api_rate_limits SET paused_until = NULL, pause_reason = NULL, updated_at = NOW()
+       WHERE user_id = $1 AND platform = $2`,
+      [req.user.userId, platform]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get recent rate limit events
+app.get('/api/ratelimits/events', authenticate, async (req, res) => {
+  try {
+    const { platform, limit = 100 } = req.query;
+
+    let query = `SELECT * FROM rate_limit_events WHERE user_id = $1`;
+    const params = [req.user.userId];
+
+    if (platform) {
+      query += ` AND platform = $2`;
+      params.push(platform);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT ${parseInt(limit)}`;
+
+    const events = await pool.query(query, params);
+    res.json({ success: true, events: events.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Queue a request for later execution
+app.post('/api/ratelimits/queue', authenticate, async (req, res) => {
+  try {
+    const { platform, endpoint, request_type, request_payload, priority = 5, scheduled_for } = req.body;
+
+    if (!platform || !request_payload) {
+      return res.status(400).json({ error: 'Platform and request_payload are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO request_queue (user_id, platform, endpoint, request_type, request_payload, priority, scheduled_for)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [req.user.userId, platform, endpoint, request_type, JSON.stringify(request_payload), priority, scheduled_for]
+    );
+
+    res.json({ success: true, queued: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get queued requests
+app.get('/api/ratelimits/queue', authenticate, async (req, res) => {
+  try {
+    const { status = 'queued' } = req.query;
+
+    const queue = await pool.query(
+      `SELECT * FROM request_queue WHERE user_id = $1 AND status = $2 ORDER BY priority DESC, created_at ASC`,
+      [req.user.userId, status]
+    );
+
+    res.json({ success: true, queue: queue.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+console.log('[RateLimits] Rate limit manager initialized');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACCOUNT HEALTH MONITOR - Track account health and warn before suspension
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Helper: Get or create account health record
+const getOrCreateAccountHealth = async (userId, platform) => {
+  let result = await pool.query(
+    'SELECT * FROM account_health WHERE user_id = $1 AND platform = $2',
+    [userId, platform]
+  );
+
+  if (result.rows.length === 0) {
+    result = await pool.query(
+      `INSERT INTO account_health (user_id, platform)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, platform) DO UPDATE SET updated_at = NOW()
+       RETURNING *`,
+      [userId, platform]
+    );
+  }
+
+  return result.rows[0];
+};
+
+// Helper: Update account health based on API call result
+const updateAccountHealth = async (userId, platform, success, metadata = {}) => {
+  const health = await getOrCreateAccountHealth(userId, platform);
+
+  // Count errors in last hour and 24 hours
+  const errorCounts = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour' AND NOT success) as errors_1h,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as total_1h,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours' AND NOT success) as errors_24h,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as total_24h,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours' AND response_code = 429) as rate_limit_hits,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours' AND response_code IN (401, 403)) as auth_failures
+     FROM rate_limit_events WHERE user_id = $1 AND platform = $2`,
+    [userId, platform]
+  );
+
+  const counts = errorCounts.rows[0];
+  const errorRate1h = counts.total_1h > 0 ? (counts.errors_1h / counts.total_1h * 100) : 0;
+  const errorRate24h = counts.total_24h > 0 ? (counts.errors_24h / counts.total_24h * 100) : 0;
+
+  // Calculate health score (0-100)
+  let healthScore = 100;
+  let warningFlags = [];
+
+  // Deduct for error rates
+  if (errorRate1h > 25) {
+    healthScore -= 30;
+    warningFlags.push('high_error_rate_1h');
+  } else if (errorRate1h > 10) {
+    healthScore -= 15;
+    warningFlags.push('elevated_error_rate_1h');
+  }
+
+  if (errorRate24h > 20) {
+    healthScore -= 20;
+    warningFlags.push('high_error_rate_24h');
+  }
+
+  // Deduct for rate limit hits
+  if (parseInt(counts.rate_limit_hits) > 10) {
+    healthScore -= 25;
+    warningFlags.push('frequent_rate_limits');
+  } else if (parseInt(counts.rate_limit_hits) > 5) {
+    healthScore -= 10;
+    warningFlags.push('occasional_rate_limits');
+  }
+
+  // Deduct for auth failures
+  if (parseInt(counts.auth_failures) > 3) {
+    healthScore -= 30;
+    warningFlags.push('auth_problems');
+  }
+
+  // Track consecutive errors
+  let consecutiveErrors = success ? 0 : health.consecutive_errors + 1;
+
+  if (consecutiveErrors >= 5) {
+    healthScore -= 20;
+    warningFlags.push('consecutive_failures');
+  }
+
+  healthScore = Math.max(0, healthScore);
+
+  // Determine status
+  let status = 'healthy';
+  if (healthScore < 50) {
+    status = 'critical';
+  } else if (healthScore < 75) {
+    status = 'warning';
+  }
+
+  // Update health record
+  await pool.query(
+    `UPDATE account_health SET
+       health_score = $3,
+       status = $4,
+       warning_flags = $5,
+       error_rate_1h = $6,
+       error_rate_24h = $7,
+       rate_limit_hits_24h = $8,
+       auth_failures_24h = $9,
+       consecutive_errors = $10,
+       last_successful_call = CASE WHEN $11 THEN NOW() ELSE last_successful_call END,
+       last_error = CASE WHEN NOT $11 THEN NOW() ELSE last_error END,
+       last_error_message = CASE WHEN NOT $11 THEN $12 ELSE last_error_message END,
+       updated_at = NOW()
+     WHERE user_id = $1 AND platform = $2`,
+    [
+      userId,
+      platform,
+      healthScore,
+      status,
+      JSON.stringify(warningFlags),
+      errorRate1h,
+      errorRate24h,
+      counts.rate_limit_hits,
+      counts.auth_failures,
+      consecutiveErrors,
+      success,
+      metadata.errorMessage
+    ]
+  );
+
+  // Create health events for significant changes
+  if (status === 'critical' && health.status !== 'critical') {
+    await pool.query(
+      `INSERT INTO health_events (user_id, platform, event_type, severity, message, details)
+       VALUES ($1, $2, 'status_change', 'critical', $3, $4)`,
+      [userId, platform, `Account health critical: ${warningFlags.join(', ')}`, JSON.stringify({ health_score: healthScore, warning_flags: warningFlags })]
+    );
+
+    // Check if auto-pause is enabled
+    const config = await pool.query(
+      'SELECT * FROM health_alert_config WHERE user_id = $1 AND platform = $2',
+      [userId, platform]
+    );
+
+    if (config.rows[0]?.auto_pause_on_critical) {
+      await pausePlatform(userId, platform, 30, 'Auto-paused due to critical health');
+    }
+  } else if (status === 'warning' && health.status === 'healthy') {
+    await pool.query(
+      `INSERT INTO health_events (user_id, platform, event_type, severity, message, details)
+       VALUES ($1, $2, 'status_change', 'warning', $3, $4)`,
+      [userId, platform, `Account health warning: ${warningFlags.join(', ')}`, JSON.stringify({ health_score: healthScore, warning_flags: warningFlags })]
+    );
+  }
+
+  return { healthScore, status, warningFlags };
+};
+
+// API: Get health status for all platforms
+app.get('/api/health/status', authenticate, async (req, res) => {
+  try {
+    const health = await pool.query(
+      `SELECT * FROM account_health WHERE user_id = $1 ORDER BY health_score ASC`,
+      [req.user.userId]
+    );
+
+    res.json({ success: true, accounts: health.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get health for specific platform
+app.get('/api/health/:platform', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+
+    const health = await getOrCreateAccountHealth(req.user.userId, platform);
+    res.json({ success: true, health });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get health events
+app.get('/api/health/events', authenticate, async (req, res) => {
+  try {
+    const { platform, severity, limit = 50 } = req.query;
+
+    let query = `SELECT * FROM health_events WHERE user_id = $1`;
+    const params = [req.user.userId];
+
+    if (platform) {
+      query += ` AND platform = $${params.length + 1}`;
+      params.push(platform);
+    }
+
+    if (severity) {
+      query += ` AND severity = $${params.length + 1}`;
+      params.push(severity);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT ${parseInt(limit)}`;
+
+    const events = await pool.query(query, params);
+    res.json({ success: true, events: events.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Acknowledge health event
+app.post('/api/health/events/:id/acknowledge', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query(
+      `UPDATE health_events SET acknowledged = TRUE, acknowledged_at = NOW()
+       WHERE id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get/update health alert config
+app.get('/api/health/config/:platform', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+
+    let result = await pool.query(
+      'SELECT * FROM health_alert_config WHERE user_id = $1 AND platform = $2',
+      [req.user.userId, platform]
+    );
+
+    if (result.rows.length === 0) {
+      result = await pool.query(
+        `INSERT INTO health_alert_config (user_id, platform)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, platform) DO UPDATE SET user_id = $1
+         RETURNING *`,
+        [req.user.userId, platform]
+      );
+    }
+
+    res.json({ success: true, config: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/health/config/:platform', authenticate, async (req, res) => {
+  try {
+    const { platform } = req.params;
+    const {
+      error_rate_warning,
+      error_rate_critical,
+      rate_limit_warning_threshold,
+      consecutive_error_warning,
+      consecutive_error_critical,
+      auto_pause_on_critical,
+      notify_on_warning,
+      notify_on_critical
+    } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO health_alert_config (user_id, platform, error_rate_warning, error_rate_critical, rate_limit_warning_threshold, consecutive_error_warning, consecutive_error_critical, auto_pause_on_critical, notify_on_warning, notify_on_critical)
+       VALUES ($1, $2, COALESCE($3, 10), COALESCE($4, 25), COALESCE($5, 80), COALESCE($6, 3), COALESCE($7, 5), COALESCE($8, true), COALESCE($9, true), COALESCE($10, true))
+       ON CONFLICT (user_id, platform) DO UPDATE SET
+         error_rate_warning = COALESCE($3, health_alert_config.error_rate_warning),
+         error_rate_critical = COALESCE($4, health_alert_config.error_rate_critical),
+         rate_limit_warning_threshold = COALESCE($5, health_alert_config.rate_limit_warning_threshold),
+         consecutive_error_warning = COALESCE($6, health_alert_config.consecutive_error_warning),
+         consecutive_error_critical = COALESCE($7, health_alert_config.consecutive_error_critical),
+         auto_pause_on_critical = COALESCE($8, health_alert_config.auto_pause_on_critical),
+         notify_on_warning = COALESCE($9, health_alert_config.notify_on_warning),
+         notify_on_critical = COALESCE($10, health_alert_config.notify_on_critical)
+       RETURNING *`,
+      [req.user.userId, platform, error_rate_warning, error_rate_critical, rate_limit_warning_threshold, consecutive_error_warning, consecutive_error_critical, auto_pause_on_critical, notify_on_warning, notify_on_critical]
+    );
+
+    res.json({ success: true, config: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Full health dashboard
+app.get('/api/health/dashboard', authenticate, async (req, res) => {
+  try {
+    // Get all account health
+    const accounts = await pool.query(
+      `SELECT * FROM account_health WHERE user_id = $1 ORDER BY health_score ASC`,
+      [req.user.userId]
+    );
+
+    // Get unacknowledged critical/warning events
+    const alerts = await pool.query(
+      `SELECT * FROM health_events
+       WHERE user_id = $1 AND NOT acknowledged AND severity IN ('critical', 'warning')
+       ORDER BY created_at DESC LIMIT 20`,
+      [req.user.userId]
+    );
+
+    // Get rate limit status
+    const rateLimits = await pool.query(
+      `SELECT platform,
+              current_window_count, requests_limit,
+              current_daily_count, daily_limit,
+              paused_until, pause_reason
+       FROM api_rate_limits WHERE user_id = $1`,
+      [req.user.userId]
+    );
+
+    // Calculate overall system health
+    const avgHealth = accounts.rows.length > 0
+      ? accounts.rows.reduce((sum, a) => sum + a.health_score, 0) / accounts.rows.length
+      : 100;
+
+    const criticalCount = accounts.rows.filter(a => a.status === 'critical').length;
+    const warningCount = accounts.rows.filter(a => a.status === 'warning').length;
+
+    res.json({
+      success: true,
+      dashboard: {
+        overallHealth: Math.round(avgHealth),
+        criticalAccounts: criticalCount,
+        warningAccounts: warningCount,
+        totalAccounts: accounts.rows.length,
+        accounts: accounts.rows,
+        unacknowledgedAlerts: alerts.rows,
+        rateLimits: rateLimits.rows.map(r => ({
+          ...r,
+          window_pct: (r.current_window_count / r.requests_limit * 100).toFixed(1),
+          daily_pct: (r.current_daily_count / r.daily_limit * 100).toFixed(1),
+          is_paused: r.paused_until && new Date(r.paused_until) > new Date()
+        }))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cron: Run health check every 5 minutes
+cron.schedule('*/5 * * * *', async () => {
+  console.log('[Health] Running periodic health check...');
+
+  try {
+    // Recalculate health scores for all accounts with recent activity
+    const activeAccounts = await pool.query(
+      `SELECT DISTINCT user_id, platform FROM rate_limit_events
+       WHERE created_at > NOW() - INTERVAL '1 hour'`
+    );
+
+    for (const account of activeAccounts.rows) {
+      await updateAccountHealth(account.user_id, account.platform, true, {});
+    }
+
+    console.log(`[Health] Updated health for ${activeAccounts.rows.length} accounts`);
+  } catch (error) {
+    console.error('[Health] Cron error:', error.message);
+  }
+});
+
+console.log('[Health] Account health monitor initialized');
